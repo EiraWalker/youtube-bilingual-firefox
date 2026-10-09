@@ -1,22 +1,46 @@
 import { completionEndpoint, validateSettings } from '../shared/settings.js';
 
+// These fields are safe diagnostics for the scheduler. Provider response bodies
+// and transport exceptions are deliberately never attached to the error.
+export class TranslationError extends Error {
+  constructor(message, { category = 'validation', status = null, retryAfterMs = 0 } = {}) {
+    super(message);
+    this.name = 'TranslationError';
+    this.category = category;
+    this.status = Number.isInteger(status) ? status : null;
+    this.retryAfterMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+      ? Math.min(Math.ceil(retryAfterMs), 2_147_483_647) : 0;
+  }
+}
+
 export function validateBatch(cues) {
-  if (!Array.isArray(cues) || !cues.length || cues.length > 100_000) throw new Error('字幕数量不正确或整轨字幕超过安全上限。');
+  if (!Array.isArray(cues) || !cues.length || cues.length > 100_000) throw new TranslationError('字幕数量不正确或整轨字幕超过安全上限。');
   let total = 0;
   const ids = new Set();
   for (const cue of cues) {
     if (!cue || typeof cue.id !== 'string' || !cue.id || cue.id.length > 160 || typeof cue.text !== 'string' || !cue.text.trim() || cue.text.length > 20_000 || ids.has(cue.id)) {
-      throw new Error('字幕内容或编号不正确。');
+      throw new TranslationError('字幕内容或编号不正确。');
     }
     ids.add(cue.id);
     total += cue.text.length;
   }
-  if (total > 5_000_000) throw new Error('整轨字幕超过安全上限（500 万字符）。');
+  if (total > 5_000_000) throw new TranslationError('整轨字幕超过安全上限（500 万字符）。');
 }
 
-// Splitting is permitted only when the provider explicitly rejects/truncates
-// the request for length. Other failures must remain visible to the user.
-export class ContextLengthError extends Error {}
+// Only an explicit length rejection permits the scheduler to split a segment.
+export class ContextLengthError extends TranslationError {
+  constructor(message, options = {}) {
+    super(message, { ...options, category: 'length' });
+    this.name = 'ContextLengthError';
+  }
+}
+
+function retryAfterMs(response) {
+  const value = response.headers?.get?.('Retry-After')?.trim();
+  if (!value || value.length > 256) return 0;
+  const delay = /^\d+(?:\.\d+)?$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+  return Number.isFinite(delay) && delay > 0 ? Math.min(Math.ceil(delay), 2_147_483_647) : 0;
+}
 
 function isContextLengthFailure(data) {
   const error = data?.error;
@@ -28,43 +52,45 @@ function isContextLengthFailure(data) {
 
 export function parseTranslations(content, cues) {
   if (Array.isArray(content)) content = content.map((part) => part.text || '').join('');
-  if (typeof content !== 'string') throw new Error('接口没有返回可用的译文。');
+  if (typeof content !== 'string') throw new TranslationError('接口没有返回可用的译文。');
   const stripped = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   let parsed;
   try { parsed = JSON.parse(stripped); }
-  catch { throw new Error('模型返回的译文不是有效 JSON。请换用能遵循 JSON 指令的模型后重试。'); }
+  catch { throw new TranslationError('模型返回的译文不是有效 JSON。请换用能遵循 JSON 指令的模型后重试。'); }
   const rows = Array.isArray(parsed) ? parsed : parsed?.translations;
-  if (!Array.isArray(rows)) throw new Error('模型返回的字幕列表格式不正确。');
+  if (!Array.isArray(rows)) throw new TranslationError('模型返回的字幕列表格式不正确。');
   const expected = new Set(cues.map((cue) => cue.id));
   const result = new Map();
   for (const row of rows) {
     // Some compatible models serialize a canonical numeric source ID as a JSON number.
     // Match its exact spelling; never reindex, round, or infer a missing cue.
     const id = typeof row?.id === 'number' && Number.isSafeInteger(row.id) ? String(row.id) : row?.id;
-    if (typeof id !== 'string') throw new Error('模型返回的字幕编号格式不正确。');
-    if (!expected.has(id)) throw new Error('模型返回了未知的字幕编号。');
-    if (result.has(id)) throw new Error('模型返回了重复的字幕编号。');
-    if (typeof row.text !== 'string' || !row.text.trim() || row.text.length > 40_000) throw new Error('模型返回了空或无效的字幕译文。');
+    if (typeof id !== 'string') throw new TranslationError('模型返回的字幕编号格式不正确。');
+    if (!expected.has(id)) throw new TranslationError('模型返回了未知的字幕编号。');
+    if (result.has(id)) throw new TranslationError('模型返回了重复的字幕编号。');
+    if (typeof row.text !== 'string' || !row.text.trim() || row.text.length > 40_000) throw new TranslationError('模型返回了空或无效的字幕译文。');
     result.set(id, row.text.trim());
   }
-  if (result.size !== cues.length) throw new Error('模型漏译了部分字幕，请重试或更换模型。');
+  if (result.size !== cues.length) throw new TranslationError('模型漏译了部分字幕，请重试或更换模型。');
   return cues.map((cue) => ({ id: cue.id, text: result.get(cue.id) }));
 }
 
 export async function translateCues(settings, cues, { fetchImpl = fetch, signal, timeoutMs = 600_000 } = {}) {
-  validateSettings(settings);
+  try { validateSettings(settings); }
+  catch { throw new TranslationError('请检查 API 地址、模型名称和目标语言。', { category: 'config' }); }
   validateBatch(cues);
-  if (signal?.aborted) throw new Error('翻译已取消。');
+  if (signal?.aborted) throw new TranslationError('翻译已取消。', { category: 'cancel' });
   const controller = new AbortController();
+  let timedOut = false;
   let rejectAbort;
   const interrupted = new Promise((_, reject) => { rejectAbort = reject; });
-  const onAbort = () => rejectAbort(new Error('翻译请求已中断。'));
+  const onAbort = () => rejectAbort(new TranslationError(timedOut ? '翻译请求超时，请检查接口后重试。' : '翻译已取消。', { category: timedOut ? 'timeout' : 'cancel' }));
   controller.signal.addEventListener('abort', onAbort, { once: true });
   const abort = () => controller.abort(signal?.reason);
   signal?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
   try {
-    if (controller.signal.aborted) throw new Error('翻译请求已中断。');
+    if (controller.signal.aborted) throw new TranslationError('翻译已取消。', { category: 'cancel' });
     const headers = { 'Content-Type': 'application/json' };
     if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
     const response = await Promise.race([fetchImpl(completionEndpoint(settings.apiBaseUrl), {
@@ -83,24 +109,27 @@ export async function translateCues(settings, cues, { fetchImpl = fetch, signal,
       }),
     }), interrupted]);
     if (!response.ok) {
-      if (response.status === 413) throw new ContextLengthError('字幕请求过长，接口拒绝接收。');
+      const diagnostics = { status: response.status, retryAfterMs: retryAfterMs(response) };
+      if (response.status === 413) throw new ContextLengthError('字幕请求过长，接口拒绝接收。', diagnostics);
       if ([400, 422].includes(response.status)) {
         let failure;
         try { failure = await Promise.race([response.json(), interrupted]); } catch { /* Do not expose provider bodies. */ }
-        if (isContextLengthFailure(failure)) throw new ContextLengthError('整轨字幕超过模型上下文长度。');
+        if (isContextLengthFailure(failure)) throw new ContextLengthError('字幕片段超过模型上下文长度。', diagnostics);
       }
       const explanations = { 401: 'API Key 无效或缺少认证', 403: '接口拒绝访问', 404: '请检查 API 地址和模型', 429: '接口限流或额度不足' };
-      throw new Error(`API 请求失败（HTTP ${response.status}）：${explanations[response.status] || '服务暂时不可用'}。`);
+      const category = response.status === 429 ? 'rate-limit' : response.status === 408 ? 'timeout'
+        : response.status >= 500 ? 'server' : 'config';
+      throw new TranslationError(`API 请求失败（HTTP ${response.status}）：${explanations[response.status] || '服务暂时不可用'}。`, { ...diagnostics, category });
     }
     let data;
-    try { data = await Promise.race([response.json(), interrupted]); } catch { throw new Error('接口响应不是有效 JSON，请检查 API 地址。'); }
+    try { data = await Promise.race([response.json(), interrupted]); } catch { throw new TranslationError('接口响应不是有效 JSON，请检查 API 地址。'); }
     if (data?.choices?.[0]?.finish_reason === 'length') throw new ContextLengthError('模型输出达到长度上限，完整译文未返回。');
-    if (isContextLengthFailure(data)) throw new ContextLengthError('整轨字幕超过模型上下文长度。');
+    if (isContextLengthFailure(data)) throw new ContextLengthError('字幕片段超过模型上下文长度。');
     return parseTranslations(data?.choices?.[0]?.message?.content, cues);
   } catch (error) {
-    if (controller.signal.aborted) throw new Error(signal?.aborted ? '翻译已取消。' : '翻译请求超时，请检查接口后重试。');
-    if (error instanceof TypeError) throw new Error('无法连接翻译接口，请检查地址、网络和网站访问权限。');
-    throw error;
+    if (controller.signal.aborted) throw new TranslationError(signal?.aborted ? '翻译已取消。' : '翻译请求超时，请检查接口后重试。', { category: signal?.aborted ? 'cancel' : 'timeout' });
+    if (error instanceof TranslationError) throw error;
+    throw new TranslationError('无法连接翻译接口，请检查地址、网络和网站访问权限。', { category: 'network' });
   } finally {
     clearTimeout(timer);
     controller.signal.removeEventListener('abort', onAbort);

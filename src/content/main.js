@@ -9,6 +9,40 @@ let cues = [], translations = new Map(), task = null;
 let submitting = false, polling = false, failed = false;
 let lastCapture = '', submittedSource = '', lookupKey = '', lookupSequence = 0;
 let fetchTimer, recoveryTimer, missingTimer, wasAdvert = false;
+let detachPlayback = () => {}, lastPositionAt = -Infinity;
+
+// Provider errors belong to the background console. Never forward arbitrary
+// response text (which can contain credentials or captions) into the page.
+function logFailure(operation) {
+  console.error('[YouTube bilingual]', { operation, category: 'operation-failed' });
+}
+function reportFailure(operation, text = '操作未完成，可稍后重试。') {
+  logFailure(operation); setStatus(text);
+}
+const isAdvert = () => player?.classList.contains('ad-showing') || player?.classList.contains('ad-interrupting');
+function playbackSnapshot(reason) {
+  if (!video || isAdvert()) return undefined;
+  return { position: Math.max(0, Number(video.currentTime) || 0), rate: Math.max(.1, Number(video.playbackRate) || 1),
+    paused: video.paused, visible: !document.hidden, reason };
+}
+async function reportPosition(reason = 'tick') {
+  if (!enabled || !task?.id || !video || isAdvert()) return;
+  const now = performance.now();
+  if (reason === 'tick' && now - lastPositionAt < 1000) return;
+  lastPositionAt = now;
+  try { await request('track:position', { id: task.id, videoId: currentVideo, ...playbackSnapshot(reason) }); }
+  catch { logFailure('track:position'); }
+}
+function bindPlayback() {
+  detachPlayback();
+  const boundVideo = video;
+  const listeners = [['timeupdate', () => void reportPosition()], ['seeked', () => void reportPosition('seek')],
+    ['play', () => void reportPosition('play')], ['ratechange', () => void reportPosition('ratechange')]];
+  for (const [name, handler] of listeners) boundVideo.addEventListener(name, handler);
+  detachPlayback = () => {
+    for (const [name, handler] of listeners) boundVideo.removeEventListener(name, handler);
+  };
+}
 
 async function request(type, data = {}) {
   const result = await browser.runtime.sendMessage({ type, ...data });
@@ -19,7 +53,7 @@ function bridge(type, data = {}) {
   window.postMessage({ channel: CHANNEL, direction: 'content', type, ...data }, location.origin);
 }
 const selectedTrack = () => tracks.find(item => item.id === trackId);
-const busy = () => submitting || task?.state === 'queued' || task?.state === 'translating';
+const busy = () => submitting || ['queued', 'translating', 'retrying'].includes(task?.state);
 const requestedTrack = () => settings?.sourceLanguage === 'auto' && !manualTrack ? '' : trackId;
 
 function updateControls() {
@@ -27,7 +61,7 @@ function updateControls() {
   exportButton.disabled = !task?.id || (exportMode.value !== 'original' && task.state !== 'complete');
   cancelButton.disabled = !task?.id || !busy();
   retryButton.disabled = busy();
-  retryButton.textContent = task?.state === 'complete' ? '重新翻译' : '重试';
+  retryButton.textContent = task?.state === 'complete' ? '重新翻译' : task?.id ? '恢复翻译' : '重试';
 }
 function setStatus(text, error = false) {
   if (status) { status.textContent = text; status.dataset.error = String(error); }
@@ -40,6 +74,7 @@ function resetView() {
   cues = []; translations = new Map(); task = null;
   submitting = false; polling = false; failed = false;
   lastCapture = ''; submittedSource = ''; lookupKey = '';
+  lastPositionAt = -Infinity;
   clearTimeout(fetchTimer); clearTimeout(recoveryTimer); clearTimeout(missingTimer);
   if (overlay) overlay.hidden = true;
   if (progress) progress.hidden = true;
@@ -48,19 +83,34 @@ function resetView() {
   player?.classList.remove('ytbl-rendering'); updateControls();
 }
 function applyTask(result) {
-  if (!result) return;
+  if (!result || (result.videoId && result.videoId !== currentVideo)) return;
+  if (result.id === task?.id && Number.isFinite(result.revision) && Number.isFinite(task?.revision)
+    && result.revision < task.revision) return;
+  const changed = result.id !== task?.id || result.revision === undefined || result.revision !== task?.revision;
   task = result;
-  failed = result.state === 'failed' || result.state === 'cancelled';
+  failed = ['failed', 'cancelled', 'paused'].includes(result.state);
+  if (changed) {
+    if (Array.isArray(result.cues)) cues = result.cues;
+    if (Array.isArray(result.translations)) translations = new Map(result.translations.map(row => [row.id, row.text]));
+  }
+  const count = `${result.translatedCount ?? translations.size} / ${result.total ?? cues.length}`;
+  clearTimeout(fetchTimer); clearTimeout(recoveryTimer); clearTimeout(missingTimer);
   if (result.state === 'complete') {
-    cues = result.cues;
-    translations = new Map(result.translations.map(row => [row.id, row.text]));
-    clearTimeout(fetchTimer); clearTimeout(recoveryTimer); clearTimeout(missingTimer);
-    setStatus(`已翻译 ${translations.size} / ${cues.length} 条字幕${result.cached ? '（已保存）' : ''}`);
+    setStatus(`已翻译 ${count} 条字幕${result.cached ? '（已保存）' : ''}`);
   } else if (failed) {
-    setStatus(result.error || (result.state === 'cancelled' ? '翻译已取消，可点击重试。' : '翻译失败，可点击重试。'), true);
-    if (panel) panel.hidden = false;
-  } else setStatus('正在翻译');
+    setStatus(`${result.state === 'cancelled' ? '已取消' : result.state === 'paused' ? '已暂停' : '未完成'} · 已保存 ${count}`);
+  } else setStatus(`${result.retryingCount ? '等待重试' : '正在翻译'} · ${count}`);
   updateControls();
+}
+async function resumeTask() {
+  if (!task?.id || submitting) return;
+  const id = task.id, version = generation;
+  submitting = true; failed = false; updateControls();
+  try {
+    const result = await request('track:resume', { id });
+    if (version === generation && id === task?.id && enabled) { applyTask(result); void reportPosition('activate'); }
+  } catch { if (version === generation) reportFailure('track:resume', '未完成，可点击恢复翻译。'); }
+  finally { if (version === generation) { submitting = false; updateControls(); } }
 }
 async function lookupTrack() {
   const track = selectedTrack();
@@ -72,9 +122,14 @@ async function lookupTrack() {
   try {
     const saved = await request('track:lookup', { videoId: currentVideo, track });
     if (version !== generation || sequence !== lookupSequence || !enabled) return;
-    if (saved) applyTask(saved);
-  } catch (error) {
-    if (version === generation && !task) setStatus(error.message, true);
+    if (saved) {
+      applyTask(saved); void reportPosition('activate');
+      // Lookup has only a track identity. Fetch the full source again so start
+      // can verify its fingerprint before resuming a paid partial task.
+      if (['failed', 'cancelled', 'paused'].includes(saved.state)) bridge('fetch-track', { trackId });
+    }
+  } catch {
+    if (version === generation && !task) logFailure('track:lookup');
   }
 }
 async function submitTrack(force = false) {
@@ -84,31 +139,32 @@ async function submitTrack(force = false) {
   if (!force && submittedSource === source) return;
   submittedSource = source; lookupSequence++;
   const version = generation;
-  submitting = true; failed = false; translations = new Map(); task = null;
+  submitting = true; failed = false;
+  if (force) { translations = new Map(); task = null; }
   setStatus('正在翻译');
   try {
     const result = await request('track:start', {
       videoId: currentVideo,
       title: document.querySelector('h1.ytd-watch-metadata')?.textContent?.trim()
         || document.title.replace(/\s*-\s*YouTube\s*$/, ''),
-      track, cues, force,
+      track, cues, force, playback: playbackSnapshot('activate'),
     });
     if (version === generation && enabled) applyTask(result);
-  } catch (error) {
-    if (version === generation) { failed = true; setStatus(error.message, true); panel.hidden = false; }
+  } catch {
+    if (version === generation) { failed = true; submittedSource = ''; reportFailure('track:start', '未完成，可点击重试。'); }
   } finally {
     if (version === generation) { submitting = false; updateControls(); }
   }
 }
 async function pollTask() {
-  if (!task?.id || polling || ['complete', 'failed', 'cancelled'].includes(task.state)) return;
+  if (!task?.id || polling || !enabled) return;
   const version = generation, id = task.id;
   polling = true;
   try {
     const result = await request('track:status', { id });
     if (version === generation && id === task?.id) applyTask(result);
-  } catch (error) {
-    if (version === generation) { failed = true; setStatus(error.message, true); }
+  } catch {
+    if (version === generation) logFailure('track:status');
   } finally { if (version === generation) polling = false; }
 }
 function scheduleCapture() {
@@ -120,7 +176,7 @@ function scheduleCapture() {
   }, 6500);
   missingTimer = setTimeout(() => {
     if (enabled && !task && !cues.length && !failed && !player?.classList.contains('ad-showing')) {
-      failed = true; setStatus('无法获取完整字幕。请确认视频提供字幕，再点击重试。', true); panel.hidden = false;
+      failed = true; reportFailure('captions:timeout', '字幕尚未就绪，可点击重试。');
     }
   }, 30000);
 }
@@ -131,7 +187,7 @@ function applyAppearance() {
 }
 function setEnabled(value) {
   if (value && !settings?.ready) {
-    setStatus('请先配置 API 地址、模型与目标语言。', true); panel.hidden = false;
+    setStatus('请先配置 API 地址、模型与目标语言。');
     request('settings:open').catch(() => {}); return;
   }
   enabled = value; resetView();
@@ -150,6 +206,7 @@ function attachPlayer(nextPlayer, nextVideo) {
   player?.classList.remove('ytbl-enabled', 'ytbl-rendering');
   overlay?.remove(); progress?.remove(); button?.remove(); panel?.remove();
   player = nextPlayer; video = nextVideo;
+  bindPlayback();
   overlay = element('div', 'ytbl-overlay'); overlay.hidden = true;
   originalLine = element('div', 'ytbl-original'); translatedLine = element('div', 'ytbl-translated');
   overlay.append(originalLine, translatedLine); player.append(overlay);
@@ -179,7 +236,8 @@ function attachPlayer(nextPlayer, nextVideo) {
   retryButton.addEventListener('click', () => {
     failed = false;
     if (!enabled) setEnabled(true);
-    else if (cues.length) void submitTrack(true);
+    else if (task?.id && task.state !== 'complete') void resumeTask();
+    else if (cues.length) void submitTrack(task?.state === 'complete');
     else {
       lookupKey = ''; submittedSource = ''; bridge('enable', { trackId: requestedTrack(), rearm: true });
       bridge('fetch-track', { trackId }); scheduleCapture(); setStatus('正在获取完整字幕…');
@@ -192,10 +250,10 @@ function attachPlayer(nextPlayer, nextVideo) {
     try {
       await request('track:cancel', { id }); const result = await request('track:status', { id });
       if (version === generation && id === task?.id) applyTask(result);
-    } catch (error) { if (version === generation) setStatus(error.message, true); }
+    } catch { if (version === generation) reportFailure('track:cancel'); }
   });
   const config = element('button', '', 'API 与已保存字幕');
-  config.addEventListener('click', () => request('settings:open').catch(error => setStatus(error.message, true)));
+  config.addEventListener('click', () => request('settings:open').catch(() => reportFailure('settings:open')));
   actions.append(retryButton, cancelButton, config);
   const exportActions = element('div', 'ytbl-export-actions');
   exportMode = element('select', 'ytbl-export-mode'); exportMode.setAttribute('aria-label', 'SRT 导出内容');
@@ -207,7 +265,7 @@ function attachPlayer(nextPlayer, nextVideo) {
   exportButton.addEventListener('click', async () => {
     exportButton.disabled = true;
     try { await request('track:download', { id: task.id, mode: exportMode.value }); }
-    catch (error) { setStatus(error.message, true); }
+    catch { reportFailure('track:download', '字幕尚未导出，可稍后重试。'); }
     finally { updateControls(); }
   });
   exportActions.append(exportMode, exportButton);
@@ -230,6 +288,7 @@ function synchronizePage() {
   if (!id || !nextPlayer || !nextVideo) {
     if (currentVideo) {
       resetView(); bridge('disable'); player?.classList.remove('ytbl-enabled', 'ytbl-rendering');
+      detachPlayback(); detachPlayback = () => {};
       overlay?.remove(); progress?.remove(); button?.remove(); panel?.remove(); player = null; video = null; currentVideo = '';
     }
     return;
@@ -258,7 +317,7 @@ window.addEventListener('message', event => {
     const awaitingNative = settings?.sourceLanguage === 'auto' && !manualTrack && !message.currentId && !trackId && tracks.length > 1;
     const selected = awaitingNative ? null : (keepCurrent && selectedTrack()) || chooseTrack(tracks, settings?.sourceLanguage || 'auto', message.currentId);
     const previous = trackId; trackId = selected?.id || ''; updateTracks();
-    if (enabled && !tracks.length) setStatus('此视频未提供字幕。需要人工或自动生成字幕。', true);
+    if (enabled && !tracks.length) setStatus('此视频暂无可用字幕。');
     if (enabled && trackId && previous !== trackId) {
       resetView(); bridge('select-track', { trackId: requestedTrack() }); scheduleCapture();
     } else void lookupTrack();
@@ -272,46 +331,56 @@ window.addEventListener('message', event => {
       if (!parsed.length) return;
       lastCapture = message.body;
       clearTimeout(fetchTimer); clearTimeout(recoveryTimer); clearTimeout(missingTimer);
-      if (JSON.stringify(parsed) === JSON.stringify(cues) && task) return;
+      if (JSON.stringify(parsed) === JSON.stringify(cues) && task) {
+        if (['failed', 'cancelled', 'paused'].includes(task.state)) void submitTrack();
+        return;
+      }
       generation++; lookupSequence++; polling = false; submitting = false;
       cues = parsed; translations = new Map(); task = null;
-      if (!failed) void submitTrack();
-    } catch { if (!failed) setStatus('完整字幕格式无法解析，请点击重试。', true); }
+      failed = false; void submitTrack();
+    } catch { if (!failed) reportFailure('captions:parse', '字幕尚未就绪，可点击重试。'); }
   }
+  if (message.type === 'status' && enabled && message.failed && task) logFailure('captions:fetch');
   if (message.type === 'status' && enabled && !task && !cues.length && !failed) {
-    if (message.failed) { failed = true; panel.hidden = false; }
-    setStatus(message.message, Boolean(message.failed));
+    if (message.failed) { failed = true; reportFailure('captions:fetch', '字幕尚未就绪，可点击重试。'); }
+    else setStatus('正在获取完整字幕…');
   }
 });
 function render() {
   if (!player || !video) return;
-  const advert = player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting');
+  const advert = isAdvert();
   const advertEnded = wasAdvert && !advert;
   wasAdvert = advert;
   if (enabled && advertEnded) {
     // The source can fail while YouTube is showing an ad. Recover its CC
     // state before checking whether the independent translation is complete.
     bridge('enable', { trackId: requestedTrack(), rearm: true });
+    void reportPosition('activate');
     if (!task && !cues.length) { failed = false; lookupKey = ''; scheduleCapture(); }
   }
   progress.hidden = !enabled || advert || failed || task?.state === 'complete' || video.ended;
-  progress.textContent = busy() ? '正在翻译' : '正在获取完整字幕…';
-  if (!enabled || advert || video.ended || busy() || failed || task?.state !== 'complete') {
+  progress.textContent = task?.retryingCount ? '等待重试' : busy() ? '正在翻译' : '正在获取完整字幕…';
+  if (!enabled || advert || video.ended) {
     overlay.hidden = true; player.classList.remove('ytbl-rendering'); return;
   }
   const cue = activeCue(cues, video.currentTime);
-  originalLine.textContent = cue?.text || ''; translatedLine.textContent = cue ? translations.get(cue.id) || '' : '';
-  overlay.hidden = !cue; player.classList.toggle('ytbl-rendering', Boolean(cue));
+  const translated = cue ? translations.get(cue.id) || '' : '';
+  originalLine.textContent = translated ? cue.text : ''; translatedLine.textContent = translated;
+  overlay.hidden = !translated; player.classList.toggle('ytbl-rendering', Boolean(translated));
 }
 browser.storage.onChanged.addListener(async (changes, area) => {
   if (area !== 'local' || !changes.settings) return;
-  settings = await request('settings:public'); applyAppearance();
-  trackId = ''; manualTrack = false; bridge('refresh');
-  if (enabled) setEnabled(settings.ready);
+  try {
+    settings = await request('settings:public'); applyAppearance();
+    trackId = ''; manualTrack = false; bridge('refresh');
+    if (enabled) setEnabled(settings.ready);
+  } catch { logFailure('settings:public'); }
 });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void reportPosition('activate'); });
+window.addEventListener('focus', () => void reportPosition('activate'));
 async function start() {
   settings = await request('settings:public'); enabled = settings.autoEnable && settings.ready;
   synchronizePage(); document.addEventListener('yt-navigate-finish', synchronizePage);
   setInterval(synchronizePage, 500); setInterval(render, 120); setInterval(() => void pollTask(), 700);
 }
-start().catch(() => {});
+start().catch(() => logFailure('initialize'));

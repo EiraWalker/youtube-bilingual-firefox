@@ -24,6 +24,7 @@ function releaseDownload(downloadId) {
 browser.downloads?.onChanged.addListener((change) => {
   if (['complete', 'interrupted'].includes(change.state?.current)) releaseDownload(change.id);
 });
+browser.tabs?.onRemoved.addListener(tabId => tasks.detach(tabId));
 
 async function downloadSrt(message) {
   const { filename, content } = await tasks.export(message.id, message.mode);
@@ -58,7 +59,13 @@ browser.runtime.onMessage.addListener((message, sender) => {
       case 'settings:open': await browser.runtime.openOptionsPage(); return null;
       case 'track:start':
         if (!trustedPage(sender)) throw new Error('请从 YouTube 页面获取字幕。');
-        return tasks.start(message);
+        return tasks.start(message, sender.tab.id);
+      case 'track:position':
+        if (!trustedPage(sender)) throw new Error('播放位置请求来源不正确。');
+        return tasks.position(message, sender.tab.id);
+      case 'track:resume':
+        if (!trustedPage(sender) && !fromOptions) throw new Error('恢复请求来源不正确。');
+        return tasks.resume(message.id);
       case 'track:lookup': return tasks.lookup(message);
       case 'track:status': return tasks.status(message.id);
       case 'track:list': return tasks.list();
@@ -81,5 +88,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
         }
       default: throw new Error('未知请求。');
     }
-  })().then((data) => ({ ok: true, data }), (error) => ({ ok: false, error: error.message || '操作失败。' }));
+  })().then((data) => ({ ok: true, data }), (error) => {
+    console.warn('[YouTube bilingual] operation failed', { operation: message?.type, category: error?.category || 'operation', status: Number.isInteger(error?.status) ? error.status : null });
+    return { ok: false, error: '操作未完成，请查看扩展控制台。' };
+  });
 });

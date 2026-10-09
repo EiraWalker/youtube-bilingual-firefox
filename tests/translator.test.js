@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { apiOriginPattern, completionEndpoint, normalizeSettings, publicSettings } from '../src/shared/settings.js';
-import { parseTranslations, translateCues, translateTrack, TranslationService } from '../src/background/translator.js';
+import { ContextLengthError, TranslationError, parseTranslations, translateCues, translateTrack, TranslationService } from '../src/background/translator.js';
 
 const settings = normalizeSettings({ apiBaseUrl: 'http://127.0.0.1:9876/v1', apiKey: 'test-only-key', model: 'fixture-model' });
 const cues = [{ id: 'a', text: 'Hello' }, { id: 'b', text: 'World' }];
@@ -61,6 +61,58 @@ test('HTTP failures redact provider response and distinguish authentication and 
   for (const code of [401, 429, 500]) {
     await assert.rejects(translateCues(settings, cues, { fetchImpl: async () => new Response('provider-secret', { status: code }) }), error => error.message.includes(String(code)) && !error.message.includes('provider-secret'));
   }
+});
+
+test('HTTP failure metadata classifies retryable requests without exposing provider bodies', async () => {
+  for (const [status, category] of [[400, 'config'], [401, 'config'], [403, 'config'], [404, 'config'], [408, 'timeout'], [422, 'config'], [429, 'rate-limit'], [500, 'server'], [503, 'server']]) {
+    await assert.rejects(translateCues(settings, cues, { fetchImpl: async () => new Response(JSON.stringify({ error: { message: 'provider-secret' } }), { status, headers: { 'Retry-After': '3' } }) }), error => {
+      assert.ok(error instanceof TranslationError);
+      assert.equal(error.category, category);
+      assert.equal(error.status, status);
+      assert.equal(error.retryAfterMs, 3000);
+      assert.ok(!error.message.includes('provider-secret'));
+      assert.ok(!JSON.stringify(error).includes('provider-secret'));
+      return true;
+    });
+  }
+});
+
+test('Retry-After accepts HTTP dates and safely bounds invalid or excessive values', async () => {
+  for (const [value, expected] of [['invalid', 0], ['-1', 0], ['Infinity', 0], ['0', 0], ['999999999999999999999', 2_147_483_647]]) {
+    await assert.rejects(translateCues(settings, cues, { fetchImpl: async () => new Response('', { status: 429, headers: { 'Retry-After': value } }) }), error => error.retryAfterMs === expected);
+  }
+  const after = new Date(Date.now() + 60_000).toUTCString();
+  await assert.rejects(translateCues(settings, cues, { fetchImpl: async () => new Response('', { status: 503, headers: { 'Retry-After': after } }) }), error => error.retryAfterMs > 58_000 && error.retryAfterMs <= 60_000);
+});
+
+test('explicit length failures expose the split category without retrying inside translateCues', async () => {
+  for (const failure of [
+    () => new Response('provider-secret', { status: 413 }),
+    () => new Response(JSON.stringify({ error: { code: 'context_length_exceeded', message: 'provider-secret' } }), { status: 400 }),
+    () => new Response(JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: 'provider-secret' } }] })),
+  ]) {
+    let calls = 0;
+    await assert.rejects(translateCues(settings, cues, { fetchImpl: async () => { calls++; return failure(); } }), error => error instanceof ContextLengthError && error.category === 'length' && !error.message.includes('provider-secret'));
+    assert.equal(calls, 1);
+  }
+});
+
+test('network, configuration and validation errors have safe scheduler categories', async () => {
+  await assert.rejects(translateCues(settings, cues, { fetchImpl: async () => { throw new Error('transport-secret'); } }), error => error.category === 'network' && !error.message.includes('transport-secret') && !('cause' in error));
+  await assert.rejects(translateCues({ ...settings, model: '' }, cues, { fetchImpl: () => assert.fail('must not fetch') }), error => error.category === 'config');
+  for (const failure of [() => new Response('invalid JSON'), () => response([{ id: 'a', text: 'missing second' }])]) {
+    await assert.rejects(translateCues(settings, cues, { fetchImpl: async () => failure() }), error => error.category === 'validation');
+  }
+  assert.throws(() => parseTranslations('invalid JSON', cues), error => error instanceof TranslationError && error.category === 'validation');
+});
+
+test('timeout releases transports and response bodies that ignore the abort signal', async () => {
+  await assert.rejects(translateCues(settings, cues, { timeoutMs: 15, fetchImpl: () => new Promise(() => {}) }), error => error.category === 'timeout');
+  await assert.rejects(translateCues(settings, cues, { timeoutMs: 15, fetchImpl: async () => ({ ok: true, json: () => new Promise(() => {}) }) }), error => error.category === 'timeout');
+  const controller = new AbortController();
+  const pending = translateCues(settings, cues, { signal: controller.signal, fetchImpl: () => new Promise(() => {}) });
+  controller.abort();
+  await assert.rejects(pending, error => error.category === 'cancel');
 });
 
 test('timeout and explicit cancellation release the in-flight request', async () => {

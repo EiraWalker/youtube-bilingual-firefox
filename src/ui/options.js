@@ -6,6 +6,15 @@ const saveButton = document.getElementById('save');
 const testButton = document.getElementById('test');
 const fields = ['apiBaseUrl', 'apiKey', 'model', 'targetLanguage', 'sourceLanguage', 'fontSize', 'bottomOffset', 'autoEnable'];
 
+function logFailure(operation) {
+  // The background owns detailed, redacted diagnostics. Arbitrary provider
+  // messages must not be echoed into the settings document or its console.
+  console.error('[YouTube bilingual]', { operation, category: 'operation-failed' });
+}
+function libraryFailure(operation) {
+  logFailure(operation); libraryStatus.textContent = '操作未完成，可稍后重试。';
+}
+
 const previewCanvas = document.getElementById('preview-canvas');
 function updatePreview() {
   const fontSize = Math.max(14, Math.min(48, Number(document.getElementById('fontSize').value) || 24));
@@ -42,14 +51,18 @@ async function save() {
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
+  try { validateSettings(collect()); }
+  catch (error) { display(error.message, true); return; }
   saveButton.disabled = true; testButton.disabled = true;
   try { await save(); display('设置已保存。返回 YouTube 即可启用双语字幕。'); }
-  catch (error) { display(error.message, true); }
+  catch { logFailure('settings:save'); display('设置尚未保存，可稍后重试。'); }
   finally { saveButton.disabled = false; testButton.disabled = false; }
 });
 
 testButton.addEventListener('click', async () => {
   if (!form.reportValidity()) return;
+  try { validateSettings(collect()); }
+  catch (error) { display(error.message, true); return; }
   saveButton.disabled = true; testButton.disabled = true;
   try {
     await save();
@@ -57,7 +70,7 @@ testButton.addEventListener('click', async () => {
     const result = await browser.runtime.sendMessage({ type: 'api:test' });
     if (!result?.ok) throw new Error(result?.error || '扩展后台没有响应。');
     display(`连接成功，测试译文：${result.data[0].text}`);
-  } catch (error) { display(error.message, true); }
+  } catch { logFailure('api:test'); display('测试未通过，请查看扩展后台控制台。'); }
   finally { saveButton.disabled = false; testButton.disabled = false; }
 });
 
@@ -67,7 +80,7 @@ readSettings(browser.storage.local).then(settings => {
     if (input.type === 'checkbox') input.checked = settings[id]; else input.value = settings[id];
   }
   updatePreview();
-}).catch(error => display(error.message, true));
+}).catch(() => { logFailure('settings:read'); display('设置尚未读取，可刷新页面重试。'); });
 
 const libraryList = document.getElementById('library-list');
 const libraryStatus = document.getElementById('library-status');
@@ -98,7 +111,7 @@ async function refreshLibrary() {
     librarySignature = signature;
     document.getElementById('library-count').textContent = `${records.length} 项`;
     document.getElementById('library-empty').hidden = records.length > 0;
-    const labels = { queued: '等待翻译', translating: '正在翻译', complete: '已保存', failed: '未完成', cancelled: '已取消' };
+    const labels = { queued: '等待翻译', translating: '正在翻译', retrying: '等待重试', paused: '已暂停', complete: '已保存', failed: '未完成', cancelled: '已取消' };
     const cards = records.map(record => {
       const card = makeElement('article', '', 'subtitle-record');
       card.dataset.taskId = record.id;
@@ -107,10 +120,10 @@ async function refreshLibrary() {
       title.href = `https://www.youtube.com/watch?v=${encodeURIComponent(record.videoId)}`;
       title.target = '_blank'; title.rel = 'noopener noreferrer';
       const heading = makeElement('div', '', 'record-heading');
-      heading.append(title, makeElement('span', labels[record.state] || record.state, 'record-state'));
+      heading.append(title, makeElement('span', record.retryingCount && record.state !== 'complete' ? '等待重试' : labels[record.state] || '未完成', 'record-state'));
       const detail = makeElement('p', `${record.track.language}${record.track.automatic ? '（自动生成）' : ''} → ${record.targetLanguage} · ${record.model}`);
       card.append(heading, detail);
-      if (record.error) card.append(makeElement('p', record.error, 'record-error'));
+      card.append(makeElement('p', `已保存 ${record.translatedCount || 0} / ${record.total || 0} 条字幕`, 'record-progress'));
       const actions = makeElement('div', '', 'record-actions');
       const mode = makeElement('select'); mode.setAttribute('aria-label', 'SRT 导出内容');
       for (const [value, label] of [['bilingual', '双语'], ['translated', '译文'], ['original', '原文']]) {
@@ -124,23 +137,31 @@ async function refreshLibrary() {
       download.addEventListener('click', async () => {
         download.disabled = true;
         try { await trackRequest('track:download', { id: record.id, mode: mode.value }); libraryStatus.textContent = '已打开字幕保存窗口。'; }
-        catch (error) { libraryStatus.textContent = error.message; }
+        catch { libraryFailure('track:download'); }
         finally { updateDownload(); }
       });
       actions.append(mode, download);
-      if (record.state === 'queued' || record.state === 'translating') {
+      if (['queued', 'translating', 'retrying'].includes(record.state)) {
         const cancel = makeElement('button', '取消翻译', 'secondary'); cancel.type = 'button';
         cancel.addEventListener('click', async () => {
           cancel.disabled = true;
           try { await trackRequest('track:cancel', { id: record.id }); await refreshLibrary(); }
-          catch (error) { libraryStatus.textContent = error.message; cancel.disabled = false; }
+          catch { libraryFailure('track:cancel'); cancel.disabled = false; }
         });
         actions.append(cancel);
+      } else if (record.canResume !== false && record.state !== 'complete') {
+        const resume = makeElement('button', '恢复翻译', 'secondary'); resume.type = 'button';
+        resume.addEventListener('click', async () => {
+          resume.disabled = true;
+          try { await trackRequest('track:resume', { id: record.id }); await refreshLibrary(); }
+          catch { libraryFailure('track:resume'); resume.disabled = false; }
+        });
+        actions.append(resume);
       }
       card.append(actions); return card;
     });
     libraryList.replaceChildren(...cards);
-  } catch (error) { libraryStatus.textContent = error.message; }
+  } catch { libraryFailure('track:list'); }
   finally { refreshing = false; }
 }
 
@@ -151,7 +172,7 @@ document.getElementById('clear-library').addEventListener('click', async event =
     await trackRequest('track:clear');
     libraryStatus.textContent = '已清除保存的译文；正在运行的任务继续执行。';
     await refreshLibrary();
-  } catch (error) { libraryStatus.textContent = error.message; }
+  } catch { libraryFailure('track:clear'); }
   finally { button.disabled = false; }
 });
 void refreshLibrary();
