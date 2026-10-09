@@ -30,6 +30,18 @@ test('model output is reordered by ID; missing, unknown and duplicate IDs fail',
   assert.throws(() => parseTranslations('not JSON', cues), /JSON/);
 });
 
+test('numeric model IDs match canonical source IDs without guessing or weakening completeness checks', () => {
+  const source = [{ id: '0', text: 'Hello' }, { id: '1', text: 'World' }];
+  assert.deepEqual(parseTranslations(JSON.stringify({ translations: [{ id: 1, text: '世界' }, { id: 0, text: '你好' }] }), source), [{ id: '0', text: '你好' }, { id: '1', text: '世界' }]);
+  for (const rows of [
+    [{ id: 0, text: '你好' }, { id: '0', text: '重复' }],
+    [{ id: 0, text: '你好' }, { id: 2, text: '未知' }],
+    [{ id: 0, text: '你好' }, { id: 1.5, text: '错误' }],
+    [{ id: 0, text: '你好' }, { id: Number.MAX_SAFE_INTEGER + 1, text: '错误' }],
+  ]) assert.throws(() => parseTranslations(JSON.stringify({ translations: rows }), source));
+  assert.throws(() => parseTranslations('{"translations":[{"id":1,"text":"你好"}]}', [{ id: '01', text: 'Hello' }]));
+});
+
 test('Chat Completions sends only text and IDs with configured model and bearer key', async () => {
   let captured;
   const translated = await translateCues(settings, [{ id: 'a', text: 'Hello', start: 10, end: 20 }], {

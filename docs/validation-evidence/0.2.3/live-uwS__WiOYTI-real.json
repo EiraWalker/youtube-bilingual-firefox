@@ -1,0 +1,57 @@
+{
+  "checks": [
+    "production bundle installs in Firefox",
+    "settings UI saves API and grants configured host",
+    "test connection uses Firefox background fetch to configured API",
+    "real API produces Chinese bilingual subtitles inside Firefox player",
+    "live video saves every translated cue from the complete source track",
+    "live video original SRT exports all saved cues",
+    "live video translated SRT exports all saved cues",
+    "live video bilingual SRT exports all saved cues",
+    "public YouTube complete-track bilingual subtitles are verified"
+  ],
+  "live": {
+    "attempted": true,
+    "title": "Cody・Lee(李) - 我愛你(MusicVideo) - YouTube",
+    "controlPresent": true,
+    "tracks": [
+      "Chinese (Traditional)",
+      "Chinese (Taiwan)",
+      "English",
+      "Spanish",
+      "Thai"
+    ],
+    "status": "已翻译 26 / 26 条字幕",
+    "originalVisible": "The train rushed by in a blink of an eye",
+    "translatedVisible": "列车转瞬呼啸而过",
+    "player": {
+      "ad": false,
+      "cc": "true",
+      "error": null,
+      "native": "",
+      "time": 40
+    },
+    "subtitleVerified": true,
+    "backgroundJob": {
+      "state": "complete",
+      "videoId": "uwS__WiOYTI",
+      "total": 26,
+      "translatedCount": 26
+    },
+    "lastCueEnd": 250.847
+  },
+  "firefoxVersion": "157.0.1",
+  "translationService": {
+    "real": true,
+    "endpoint": "http://127.0.0.1:8045/v1",
+    "model": "gemini-3.8-flash-high"
+  },
+  "realApiPlayer": {
+    "embedded": true,
+    "original": "Hello world.",
+    "translated": "你好，世界。"
+  },
+  "passed": true,
+  "apiRequestCount": 0,
+  "isolatedProfileRemoved": true
+}

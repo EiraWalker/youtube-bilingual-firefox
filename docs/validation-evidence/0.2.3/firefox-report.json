@@ -52,11 +52,11 @@
   "firefoxVersion": "157.0.1",
   "translationService": {
     "real": false,
-    "endpoint": "http://127.0.0.1:5029/v1",
+    "endpoint": "http://127.0.0.1:4122/v1",
     "model": "fixture-model"
   },
   "backgroundJob": {
-    "id": "37e75c5ce812dfdd7d58dee5553fb7ba3524b4d070715b2293806f211562ccae",
+    "id": "a13b413baa95dca5e4d80d495b00d93a99323f568b21fdc5f29c2288a2079fef",
     "state": "complete",
     "videoId": "fixture0007",
     "total": 4,

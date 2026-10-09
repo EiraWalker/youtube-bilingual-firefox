@@ -1,0 +1,54 @@
+{
+  "checks": [
+    "production bundle installs in Firefox",
+    "settings UI saves API and grants configured host",
+    "test connection uses Firefox background fetch to configured API",
+    "real API produces Chinese bilingual subtitles inside Firefox player",
+    "live video saves every translated cue from the complete source track",
+    "live video original SRT exports all saved cues",
+    "live video translated SRT exports all saved cues",
+    "live video bilingual SRT exports all saved cues",
+    "public YouTube complete-track bilingual subtitles are verified"
+  ],
+  "live": {
+    "attempted": true,
+    "title": "OpenAI researcher on agent swarms & recursive self-improvement - YouTube",
+    "controlPresent": true,
+    "tracks": [
+      "English",
+      "English (auto-generated)（自动生成）"
+    ],
+    "status": "已翻译 993 / 993 条字幕",
+    "originalVisible": "I feel like you’re in a similar position now \nto help us understand what future capabilities",
+    "translatedVisible": "我觉得你现在也处于类似的位置，鉴于我们目前能实现的",
+    "player": {
+      "ad": false,
+      "cc": "true",
+      "error": null,
+      "native": "",
+      "time": 40
+    },
+    "subtitleVerified": true,
+    "backgroundJob": {
+      "state": "complete",
+      "videoId": "6AgOfiZOWiY",
+      "total": 993,
+      "translatedCount": 993
+    },
+    "lastCueEnd": 4809.6
+  },
+  "firefoxVersion": "157.0.1",
+  "translationService": {
+    "real": true,
+    "endpoint": "http://127.0.0.1:8045/v1",
+    "model": "gemini-3.8-flash-high"
+  },
+  "realApiPlayer": {
+    "embedded": true,
+    "original": "Hello world.",
+    "translated": "你好，世界。"
+  },
+  "passed": true,
+  "apiRequestCount": 0,
+  "isolatedProfileRemoved": true
+}

@@ -62,7 +62,8 @@ class ApiHandler(http.server.BaseHTTPRequestHandler):
         if delay:
             time.sleep(delay)
         translations = {'Hello world.': '你好，世界。', 'Second subtitle.': '第二条字幕。', 'After seeking.': '跳转后的字幕。', 'A distant subtitle.': '远处的字幕。'}
-        payload = {'choices': [{'message': {'content': json.dumps({'translations': [{'id': cue['id'], 'text': translations.get(cue['text'], '测试译文：' + cue['text'])} for cue in subtitles]}, ensure_ascii=False)}}]}
+        # Exercise compatible providers that return numeric IDs for numeric source IDs.
+        payload = {'choices': [{'message': {'content': json.dumps({'translations': [{'id': int(cue['id']) if cue['id'].isdigit() else cue['id'], 'text': translations.get(cue['text'], '测试译文：' + cue['text'])} for cue in subtitles]}, ensure_ascii=False)}}]}
         data = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header('Content-Type', 'application/json')
@@ -388,6 +389,8 @@ def main():
             driver.wait("document.querySelector('.ytbl-status').textContent.includes('4 / 4')")
             check('explicit retry after API authorization restores the complete bilingual track', len(STATE['requests']) == permission_before + 1)
             after_japanese = len(STATE['requests'])
+            driver.js("const video=document.querySelector('video');video.currentTime=.5;video.pause()")
+            driver.wait("document.querySelector('.ytbl-original').textContent === 'Hello world.'")
             check('MAIN fetch capture translates JSON3 into embedded bilingual overlay', driver.js("return document.querySelector('.ytbl-overlay').parentElement.id === 'movie_player' && document.querySelector('.ytbl-original').textContent === 'Hello world.'"))
             driver.wait("!document.querySelector('.ytbl-overlay').hidden && document.getElementById('movie_player').classList.contains('ytbl-rendering')")
             check('native captions hidden during bilingual display', driver.js("return getComputedStyle(document.querySelector('.ytp-caption-window-container')).visibility === 'hidden'"))
@@ -591,7 +594,7 @@ def main():
                     report['live']['lastCueEnd'] = complete['cues'][-1]['end']
                     for mode in ['original', 'translated', 'bilingual']:
                         exported = extension_message(driver, {'type': 'track:export', 'id': job['id'], 'mode': mode})
-                        check(f'live video {mode} SRT exports all saved cues', len(re.findall(r'(?m)^\d+\r?$', exported['content'])) == job['total'])
+                        check(f'live video {mode} SRT exports all saved cues', len(re.findall(r'(?m)^\d{2,}:\d{2}:\d{2},\d{3} --> ', exported['content'])) == job['total'])
                     if not options.real_api:
                         check('live complete track uses one translation API request', sum(r['count'] == job['total'] for r in STATE['requests']) == 1)
                 if not report['live']['originalVisible']:

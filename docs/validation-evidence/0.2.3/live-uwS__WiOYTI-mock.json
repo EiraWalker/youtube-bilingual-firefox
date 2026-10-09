@@ -23,14 +23,14 @@
       "Thai"
     ],
     "status": "已翻译 26 / 26 条字幕",
-    "originalVisible": "The after image of the destination board",
-    "translatedVisible": "测试译文：The after image of the destination board",
+    "originalVisible": "The train rushed by in a blink of an eye",
+    "translatedVisible": "测试译文：The train rushed by in a blink of an eye",
     "player": {
       "ad": false,
       "cc": "true",
       "error": null,
       "native": "",
-      "time": 47.466791
+      "time": 40
     },
     "subtitleVerified": true,
     "backgroundJob": {
@@ -44,7 +44,7 @@
   "firefoxVersion": "157.0.1",
   "translationService": {
     "real": false,
-    "endpoint": "http://127.0.0.1:2078/v1",
+    "endpoint": "http://127.0.0.1:6586/v1",
     "model": "fixture-model"
   },
   "passed": true,

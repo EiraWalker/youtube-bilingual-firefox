@@ -38,10 +38,14 @@ export function parseTranslations(content, cues) {
   const expected = new Set(cues.map((cue) => cue.id));
   const result = new Map();
   for (const row of rows) {
-    if (!row || typeof row.id !== 'string' || !expected.has(row.id) || result.has(row.id) || typeof row.text !== 'string' || !row.text.trim() || row.text.length > 40_000) {
-      throw new Error('模型返回了无效、重复或未知的字幕编号。');
-    }
-    result.set(row.id, row.text.trim());
+    // Some compatible models serialize a canonical numeric source ID as a JSON number.
+    // Match its exact spelling; never reindex, round, or infer a missing cue.
+    const id = typeof row?.id === 'number' && Number.isSafeInteger(row.id) ? String(row.id) : row?.id;
+    if (typeof id !== 'string') throw new Error('模型返回的字幕编号格式不正确。');
+    if (!expected.has(id)) throw new Error('模型返回了未知的字幕编号。');
+    if (result.has(id)) throw new Error('模型返回了重复的字幕编号。');
+    if (typeof row.text !== 'string' || !row.text.trim() || row.text.length > 40_000) throw new Error('模型返回了空或无效的字幕译文。');
+    result.set(id, row.text.trim());
   }
   if (result.size !== cues.length) throw new Error('模型漏译了部分字幕，请重试或更换模型。');
   return cues.map((cue) => ({ id: cue.id, text: result.get(cue.id) }));
