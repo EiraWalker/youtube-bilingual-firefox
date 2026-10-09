@@ -117,6 +117,7 @@ export class TrackTaskService {
     if (prior?.record.state === 'complete' && !force) {
       prior.cached = true; this.updatePosition(prior, playback, pageId); return publicTask(prior, true);
     }
+    if (prior && !force && prior.record.translations.length === prior.record.cues.length) return this.activate(prior, null);
     if (!await this.hasPermission(settings)) throw new Error('尚未授权访问翻译接口，请打开设置页保存并授权。');
     if (prior && !force) { this.updatePosition(prior, playback, pageId); return this.activate(prior, settings); }
     if (prior) { await this.cancel(id); await prior.persistence; }
@@ -130,6 +131,15 @@ export class TrackTaskService {
   }
   async activate(entry, settings) {
     if (entry.running) return publicTask(entry, true);
+    if (entry.record.translations.length === entry.record.cues.length) {
+      // A cancel/save race can leave every row durable under a cancelled
+      // status. Recovery finalizes that status without another API call.
+      await this.enqueue(entry, async () => {
+        const next = { ...entry.record, state: 'complete', revision: entry.record.revision + 1, updatedAt: this.now() };
+        await this.write(next); entry.record = next; entry.cached = true;
+      });
+      return publicTask(entry, true);
+    }
     if (entry.controller.signal.aborted) {
       entry.controller = new AbortController();
       for (const [key, segment] of entry.segments) if (segment.state === 'inflight') entry.segments.delete(key);
@@ -150,6 +160,7 @@ export class TrackTaskService {
     await this.ready;
     const entry = this.entry(id);
     if (entry.record.state === 'complete') return publicTask(entry, true);
+    if (entry.record.translations.length === entry.record.cues.length) return this.activate(entry, null);
     const settings = { ...validateSettings(await this.loadSettings()) };
     if (await this.configIdentity(settings) !== entry.record.configFingerprint) throw new Error('翻译配置已改变，请从视频页面开启新的字幕任务。');
     if (!await this.hasPermission(settings)) throw new Error('尚未授权访问翻译接口。');

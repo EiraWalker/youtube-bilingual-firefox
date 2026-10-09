@@ -1,8 +1,8 @@
 # 分段字幕翻译：GitHub issue 草稿
 
-日期：2026-10-10。目标仓库：`EiraWalker/youtube-bilingual-firefox`（私有）。状态：本地草稿，尚未创建远程 issue。无现有父 issue。
+日期：2026-10-10。目标仓库：`EiraWalker/youtube-bilingual-firefox`（私有）。状态：拆分已确认，六项已发布到私有仓库。无现有父 issue。
 
-依据：[PRD](../prd-buffered-subtitle-translation.md)。S1–S6 是草稿编号，获批发布后替换为真实 issue 编号。建议每项附 `enhancement`、`ready-for-agent`；后者尚不存在，需确认任务分流配置后建立。
+依据：[PRD](../prd-buffered-subtitle-translation.md)。S1–S6 对应 GitHub #1–#6，附 enhancement、ready-for-agent；默认任务标签和 AGENTS.md 配置已获用户确认。正文保留实施范围，发布后的依赖使用真实 issue 编号。
 
 ## 拆分概览
 
@@ -145,3 +145,12 @@ None - can start immediately
 - S3：跳转后优先补齐新位置。
 - S4：多视频独立并发并在后台完成。
 - S5：翻译失败自动重试且仅控制台报错。
+
+## 已发布任务
+
+- [S1 / #1 首段译文完成即显示并保存](https://github.com/EiraWalker/youtube-bilingual-firefox/issues/1)
+- [S2 / #2 每视频三个并发与自适应提前缓冲](https://github.com/EiraWalker/youtube-bilingual-firefox/issues/2)
+- [S3 / #3 跳转后优先补齐新位置](https://github.com/EiraWalker/youtube-bilingual-firefox/issues/3)
+- [S4 / #4 多视频独立并发并在后台完成](https://github.com/EiraWalker/youtube-bilingual-firefox/issues/4)
+- [S5 / #5 翻译失败自动重试且仅控制台报错](https://github.com/EiraWalker/youtube-bilingual-firefox/issues/5)
+- [S6 / #6 恢复已保存片段并导出完整 SRT](https://github.com/EiraWalker/youtube-bilingual-firefox/issues/6)

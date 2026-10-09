@@ -235,7 +235,7 @@ test('exhausted storage writes pause; manual resume saves retained results witho
 test('cancellation during persistence wins state but retains successfully saved rows', async () => {
   const local = storage(), save = local.set.bind(local); let release;
   local.set = async values => {
-    if (Object.values(values).some(r => r.state === 'complete')) await new Promise(resolve => { release = resolve; });
+    if (!release && Object.values(values).some(r => r.state === 'complete')) await new Promise(resolve => { release = resolve; });
     await save(values);
   };
   const service = create({ local });
@@ -247,6 +247,10 @@ test('cancellation during persistence wins state but retains successfully saved 
   assert.equal((await service.status(task.id)).state, 'cancelled');
   assert.equal(Object.values(local.saved)[0].state, 'cancelled');
   assert.equal(Object.values(local.saved)[0].translations.length, 1);
+  service.fetchImpl = () => assert.fail('all durable rows must not be translated again');
+  service.hasPermission = async () => false;
+  assert.equal((await service.resume(task.id)).state, 'complete');
+  assert.equal(Object.values(local.saved)[0].state, 'complete');
 });
 
 test('cancel followed immediately by resume isolates aborted callbacks and fills all missing cues', async () => {

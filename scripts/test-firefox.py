@@ -24,6 +24,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from xml.sax.saxutils import escape
 import zipfile
 
 from cryptography import x509
@@ -35,7 +36,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / 'output' / ('firefox-live' if '--live-only' in sys.argv else 'firefox')
 OUT.mkdir(parents=True, exist_ok=True)
 ADDON_ID = 'youtube-bilingual-local@local.extension'
-STATE = {'requests': [], 'failure': 0, 'caption_mode': 'json3', 'delay': 0}
+FIXTURE_CUES = sorted(
+    [(0, 'Hello world.'), (3000, 'Second subtitle.'), (8000, 'After seeking.'),
+     (150000, 'A distant subtitle.')]
+    + [(second * 1000, f'Fixture caption {second}: ' + 'buffered words ' * 8)
+       for second in list(range(20, 150, 5)) + list(range(155, 180, 5))])
+STATE = {'requests': [], 'caption_mode': 'json3', 'tag': 'setup', 'controls': {},
+         'active': 0, 'peak': 0, 'lock': threading.Lock()}
 CHECKS = []
 
 
@@ -53,27 +60,52 @@ class ApiHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         subtitles = json.loads(body['messages'][1]['content'])['subtitles']
-        record = {'path': self.path, 'model': body['model'], 'count': len(subtitles), 'ids': [cue['id'] for cue in subtitles], 'texts': [cue['text'] for cue in subtitles], 'completed': False, 'has_test_auth': self.headers.get('Authorization') == 'Bearer fixture-key'}
-        STATE['requests'].append(record)
-        code = STATE['failure'] or 200
-        STATE['failure'] = 0
-        delay = STATE['delay']
-        STATE['delay'] = 0
+        with STATE['lock']:
+            tag = STATE['tag']
+            control = STATE['controls'].get(tag, {})
+            index = sum(record['tag'] == tag for record in STATE['requests'])
+            code = 200
+            ids = [cue['id'] for cue in subtitles]
+            failures = control.get('failures', {})
+            for cue_id in ids:
+                if failures.get(cue_id, 0):
+                    failures[cue_id] -= 1
+                    code = control.get('failure_status', 429)
+                    break
+            delays = control.get('delays', [])
+            delay = delays[index] if index < len(delays) else control.get('delay', .05)
+            gates = control.get('gates', [])
+            gate = gates[index] if index < len(gates) else control.get('gate')
+            STATE['active'] += 1
+            STATE['peak'] = max(STATE['peak'], STATE['active'])
+            record = {'path': self.path, 'model': body['model'], 'count': len(subtitles),
+                      'ids': ids, 'completed': False, 'status': code, 'tag': tag,
+                      'started': time.monotonic(), 'active': STATE['active'],
+                      'has_test_auth': self.headers.get('Authorization') == 'Bearer fixture-key'}
+            STATE['requests'].append(record)
+        if gate:
+            gate.wait(45)
         if delay:
             time.sleep(delay)
         translations = {'Hello world.': '你好，世界。', 'Second subtitle.': '第二条字幕。', 'After seeking.': '跳转后的字幕。', 'A distant subtitle.': '远处的字幕。'}
         # Exercise compatible providers that return numeric IDs for numeric source IDs.
         payload = {'choices': [{'message': {'content': json.dumps({'translations': [{'id': int(cue['id']) if cue['id'].isdigit() else cue['id'], 'text': translations.get(cue['text'], '测试译文：' + cue['text'])} for cue in subtitles]}, ensure_ascii=False)}}]}
         data = json.dumps(payload, ensure_ascii=False).encode()
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(data)))
-        self.end_headers()
         try:
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json')
+            if code == 429:
+                self.send_header('Retry-After', '1')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
             self.wfile.write(data)
             record['completed'] = True
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             record['aborted'] = True
+        finally:
+            with STATE['lock']:
+                record['ended'] = time.monotonic()
+                STATE['active'] -= 1
 
 
 def create_tls():
@@ -133,12 +165,17 @@ class FixtureProxy(socketserver.StreamRequestHandler):
                     if STATE['caption_mode'] == 'empty':
                         data = b''
                     elif STATE['caption_mode'] == 'xml':
-                        data = b'<timedtext><body><p t="0" d="2000">XML caption.</p><p t="3000" d="2000">Second subtitle.</p><p t="8000" d="2000">After seeking.</p><p t="150000" d="2000">A distant subtitle.</p></body></timedtext>'
+                        data = ('<timedtext><body>' + ''.join(
+                            f'<p t="{t}" d="2000">{escape("XML caption." if t == 0 else text)}</p>'
+                            for t, text in FIXTURE_CUES) + '</body></timedtext>').encode()
                     else:
-                        data = json.dumps({'events': [{'tStartMs': t, 'dDurationMs': 2000, 'segs': [{'utf8': text}]} for t, text in [(0, 'Hello world.'), (3000, 'Second subtitle.'), (8000, 'After seeking.'), (150000, 'A distant subtitle.')]]}).encode()
+                        data = json.dumps({'events': [{'tStartMs': t, 'dDurationMs': 2000, 'segs': [{'utf8': text}]} for t, text in FIXTURE_CUES]}).encode()
                     content_type = 'application/json'
                 else:
-                    data = (ROOT / 'tests/fixtures/youtube.html').read_bytes()
+                    html = (ROOT / 'tests/fixtures/youtube.html').read_text(encoding='utf-8')
+                    native = [[t / 1000, t / 1000 + 2, text] for t, text in FIXTURE_CUES]
+                    html = html.replace("[[0, 2, 'Hello world.'], [3, 5, 'Second subtitle.'], [8, 10, 'After seeking.'], [150, 152, 'A distant subtitle.']]", json.dumps(native))
+                    data = html.encode()
                     content_type = 'text/html; charset=utf-8'
                 conn.sendall(f'HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len(data)}\r\nConnection: close\r\n\r\n'.encode() + data)
         except (OSError, ssl.SSLError):
@@ -219,7 +256,50 @@ def wait_job(driver, job_id, state='complete', timeout=15):
         if result and result.get('state') == state:
             return result
         time.sleep(.15)
-    raise AssertionError('Background job did not reach ' + state + ': ' + str(result))
+    summary = {key: result.get(key) for key in ['id', 'state', 'total', 'translatedCount']} if result else None
+    raise AssertionError('Background job did not reach ' + state + ': ' + str(summary))
+
+
+def add_live_timing_evidence(live, task):
+    """Keep ready-range latency distinct from the first on-screen caption.
+
+    All absolute timestamps use the browser's Date.now clock. The legacy
+    firstUsableSeconds field remains the observed on-screen latency; it must
+    not silently become a backend-only number that excludes source retrieval.
+    """
+    metrics = dict(task.get('metrics', {}))
+    live['backendMetrics'] = metrics
+    live['sourceTrack'] = task.get('track')
+    cues = task.get('cues', [])
+    position = live.get('playbackPositionAtEnable', 0)
+    relevant = next((cue for cue in cues if cue['end'] > position), None)
+    live['sourceTiming'] = {
+        'cueCount': len(cues),
+        'firstCueStart': cues[0]['start'] if cues else None,
+        'lastCueEnd': cues[-1]['end'] if cues else None,
+        'firstRelevantCueStart': relevant['start'] if relevant else None,
+        'firstRelevantCueEnd': relevant['end'] if relevant else None,
+        'startedInSubtitleGap': bool(relevant and relevant['start'] > position),
+        'sourceSecondsUntilNextCueAtEnable': max(0, relevant['start'] - position) if relevant else None,
+    }
+    def elapsed(start, end):
+        return round((end - start) / 1000, 3) if isinstance(start, (int, float)) and isinstance(end, (int, float)) and start > 0 and end >= start else None
+    enabled = live.get('enabledAtEpochMs')
+    started = metrics.get('startedAt')
+    ready = metrics.get('firstUsableAt')
+    live['phaseTimingsSeconds'] = {
+        'enableToTaskStart': elapsed(enabled, started),
+        'taskStartToFirstSaved': elapsed(started, metrics.get('firstSavedAt')),
+        'taskStartToFirstRangeReady': elapsed(started, ready),
+        'enableToFirstSaved': elapsed(enabled, metrics.get('firstSavedAt')),
+        'enableToFirstRangeReady': elapsed(enabled, ready),
+        'enableToFirstOnscreen': elapsed(enabled, live.get('firstOnscreenAtEpochMs')),
+        'rangeReadyToFirstOnscreen': elapsed(ready, live.get('firstOnscreenAtEpochMs')),
+    }
+    live['firstRangeReadySeconds'] = live['phaseTimingsSeconds']['enableToFirstRangeReady']
+    live['firstRangeReadyWithin20Seconds'] = live['firstRangeReadySeconds'] <= 20 if live['firstRangeReadySeconds'] is not None else None
+    live['firstUsableMetric'] = 'onscreen_current_cue'
+    live['rangeReadyMetric'] = 'backend_current_or_next_source_cue_after_durable_save'
 
 
 def save_and_authorize(driver):
@@ -242,6 +322,7 @@ def main():
     args.add_argument('--live-only', action='store_true', help='Skip the already verified local player cases.')
     args.add_argument('--video', default='dQw4w9WgXcQ', help='Public YouTube video ID used by the live probe.')
     args.add_argument('--real-api', action='store_true', help='Read private API configuration from stdin; only valid with --live-only.')
+    args.add_argument('--first-only', action='store_true', help='Measure first usable subtitles, explicitly cancel the task, and skip whole-track exports; requires --live-only.')
     args.add_argument('--report-tag', default='', help='Separate evidence under output using a letters/digits/hyphens tag.')
     args.add_argument('--firefox', default=r'C:\Program Files\Mozilla Firefox\firefox.exe')
     args.add_argument('--geckodriver', default=str(ROOT / '.tools/geckodriver/geckodriver.exe'))
@@ -255,7 +336,12 @@ def main():
         options.live = True
     if options.real_api and not options.live_only:
         args.error('--real-api requires --live-only')
-    real_api = json.loads(sys.stdin.readline()) if options.real_api else None
+    if options.first_only and not options.live_only:
+        args.error('--first-only requires --live-only')
+    try:
+        real_api = json.loads(sys.stdin.readline()) if options.real_api else None
+    except (ValueError, TypeError):
+        args.error('Private API configuration must be valid JSON on stdin.')
     api = http.server.ThreadingHTTPServer(('127.0.0.1', 0), ApiHandler)
     proxy = ThreadingProxy(('127.0.0.1', 0), FixtureProxy)
     for server in [api, proxy]:
@@ -280,7 +366,7 @@ def main():
             'browser.download.dir': str(download_dir), 'browser.download.useDownloadDir': True,
             'browser.download.alwaysOpenPanel': False,
         }}}
-    report = {'checks': CHECKS, 'live': {'attempted': False}}
+    report = {'checks': CHECKS, 'live': {'attempted': False, 'firstOnly': options.first_only}}
     try:
         for _ in range(100):
             try:
@@ -301,6 +387,7 @@ def main():
         driver.js("for (const [key,value] of Object.entries(arguments[0])) document.getElementById(key).value=value", config)
         report['translationService'] = { 'real': options.real_api, 'endpoint': config['apiBaseUrl'], 'model': config['model'] }
         save_and_authorize(driver)
+        report['live']['sourceLanguageSetting'] = driver.js("return document.getElementById('sourceLanguage')?.value || 'auto'")
         check('settings UI saves API and grants configured host', True)
         driver.click('#test')
         driver.wait("document.getElementById('status').textContent.includes('连接成功')")
@@ -314,226 +401,12 @@ def main():
                     time.sleep(.1)
                 driver.wait("document.getElementById('status').textContent.includes('连接成功')")
             check('each repeated test-connection click makes a new API request', len(STATE['requests']) == test_before + 2)
-        if options.real_api:
-            driver.cmd('/url', {'url': 'https://www.youtube.com/watch?v=fixture0001'})
-            driver.wait("document.querySelector('.ytbl-toggle')?.parentElement.classList.contains('ytp-right-controls')")
-            driver.wait("document.querySelector('video').duration > 10")
-            driver.click('.ytbl-toggle')
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('已翻译') && !document.querySelector('.ytbl-overlay').hidden && document.querySelector('.ytbl-translated').textContent !== '翻译中…'", 55)
-            report['realApiPlayer'] = driver.js("return {original:document.querySelector('.ytbl-original').textContent,translated:document.querySelector('.ytbl-translated').textContent,embedded:document.querySelector('.ytbl-overlay').parentElement.id==='movie_player'}")
-            check('real API produces Chinese bilingual subtitles inside Firefox player', report['realApiPlayer']['embedded'] and report['realApiPlayer']['original'] == 'Hello world.')
-            (OUT / 'real-api-player.png').write_bytes(base64.b64decode(driver.cmd('/screenshot')))
-            driver.click('.ytbl-toggle')
         if not options.live_only:
-            driver.cmd('/url', {'url': 'https://www.youtube.com/watch?v=fixture0001'})
-            driver.wait("document.querySelector('.ytbl-toggle')")
-            driver.wait("document.querySelector('.ytbl-toggle').parentElement.classList.contains('ytp-right-controls')")
-            check('delayed YouTube controls receive the extension button', True)
-            driver.wait("document.querySelector('video').duration > 160")
-            before = len(STATE['requests'])
-            time.sleep(.8)
-            check('no translation request before enable', len(STATE['requests']) == before)
-            STATE['delay'] = 3
-            driver.js("document.querySelector('video').play()")
-            driver.click('.ytbl-toggle')
-            driver.wait("document.querySelector('.ytbl-progress')?.textContent === '正在翻译' && !document.querySelector('.ytbl-progress').hidden")
-            driver.wait("document.querySelector('.ytp-caption-segment').textContent === 'Hello world.'")
-            start_time = driver.js("return document.querySelector('video').currentTime")
-            time.sleep(.35)
-            check('whole-track wait shows progress and keeps native CC and playback active', driver.js("return !document.querySelector('video').paused && document.querySelector('video').currentTime > arguments[0] && getComputedStyle(document.querySelector('.ytp-caption-window-container')).visibility === 'visible' && document.querySelector('.ytbl-overlay').hidden", start_time))
-            driver.js("document.querySelector('video').pause();document.querySelector('video').currentTime=.5")
-            driver.wait("document.querySelector('.ytbl-translated')?.textContent === '你好，世界。'")
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('4 / 4')")
-            check('one API request translates the complete track including the distant cue', len(STATE['requests']) == before + 1 and STATE['requests'][-1]['count'] == 4 and 'A distant subtitle.' in STATE['requests'][-1]['texts'])
-            check('auto mode follows native caption language instead of first sorted track', driver.js("return document.getElementById('movie_player').getOption('captions','track').languageCode === 'en'"))
-            driver.js("document.querySelector('.ytbl-track').value='.ja';document.querySelector('.ytbl-track').dispatchEvent(new Event('change'))")
-            driver.wait("document.getElementById('movie_player').getOption('captions','track').languageCode === 'ja' && document.querySelector('.ytbl-translated').textContent === '你好，世界。' && document.querySelector('.ytbl-status').textContent.includes('4 / 4')")
-            after_japanese = len(STATE['requests'])
-            driver.js("document.querySelector('.ytbl-track').value='.en';document.querySelector('.ytbl-track').dispatchEvent(new Event('change'))")
-            driver.wait("document.getElementById('movie_player').getOption('captions','track').languageCode === 'en' && document.querySelector('.ytbl-translated').textContent === '你好，世界。'")
-            check('source track selector translates each language once and reuses completed English', after_japanese == before + 2 and len(STATE['requests']) == after_japanese)
-
-            STATE['delay'] = 4
-            retry_before = len(STATE['requests'])
-            driver.js("document.querySelector('.ytbl-retry').click()")
-            driver.wait("!document.querySelector('.ytbl-progress').hidden && document.querySelector('.ytbl-progress').textContent === '正在翻译'")
-            check('retranslation removes old bilingual overlay and shows native CC plus progress', driver.js("return document.querySelector('.ytbl-overlay').hidden && getComputedStyle(document.querySelector('.ytp-caption-window-container')).visibility === 'visible' && document.querySelector('.ytp-caption-segment').textContent === 'Hello world.'"))
-            driver.js("document.getElementById('movie_player').classList.add('ad-showing');document.querySelector('.ytp-subtitles-button').setAttribute('aria-pressed','false')")
-            driver.wait("document.querySelector('.ytbl-progress').hidden")
-            driver.js("document.getElementById('movie_player').classList.remove('ad-showing')")
-            driver.wait("document.querySelector('.ytp-subtitles-button').getAttribute('aria-pressed') === 'true' && !document.querySelector('.ytbl-progress').hidden && document.querySelector('.ytbl-overlay').hidden")
-            check('advertisement ending while translation is pending restores native caption source', True)
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('4 / 4')")
-            check('retranslation including an ad transition issues exactly one whole-track API request', len(STATE['requests']) == retry_before + 1)
-
-            # Revoke only the test API host in the disposable profile. A force
-            # submission must fail visibly without continuing to show old data.
-            player_handle = driver.cmd('/window')
-            permission_handle = driver.cmd('/window/new', {'type': 'tab'})['handle']
-            driver.cmd('/window', {'handle': permission_handle})
-            driver.cmd('/url', {'url': options_url})
-            driver.wait("document.getElementById('model').value === 'fixture-model'")
-            removed = driver.async_js("const done=arguments[arguments.length-1];browser.permissions.remove({origins:['http://127.0.0.1/*']}).then(done)")
-            check('test can revoke its API permission in the isolated profile', removed)
-            driver.cmd('/window', {'handle': player_handle})
-            permission_before = len(STATE['requests'])
-            driver.js("document.querySelector('.ytbl-retry').click()")
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('授权')")
-            driver.wait("document.querySelector('.ytbl-overlay').hidden && getComputedStyle(document.querySelector('.ytp-caption-window-container')).visibility === 'visible'")
-            check('rejected retranslation restores native CC without stale bilingual content or API call', len(STATE['requests']) == permission_before and driver.js("return document.querySelector('.ytbl-overlay').hidden && getComputedStyle(document.querySelector('.ytp-caption-window-container')).visibility === 'visible'"))
-            driver.cmd('/window', {'handle': permission_handle})
-            save_and_authorize(driver)
-            driver.cmd('/window', method='DELETE')
-            driver.cmd('/window', {'handle': player_handle})
-            driver.js("document.querySelector('.ytbl-retry').click()")
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('4 / 4')")
-            check('explicit retry after API authorization restores the complete bilingual track', len(STATE['requests']) == permission_before + 1)
-            after_japanese = len(STATE['requests'])
-            driver.js("const video=document.querySelector('video');video.currentTime=.5;video.pause()")
-            driver.wait("document.querySelector('.ytbl-original').textContent === 'Hello world.'")
-            check('MAIN fetch capture translates JSON3 into embedded bilingual overlay', driver.js("return document.querySelector('.ytbl-overlay').parentElement.id === 'movie_player' && document.querySelector('.ytbl-original').textContent === 'Hello world.'"))
-            driver.wait("!document.querySelector('.ytbl-overlay').hidden && document.getElementById('movie_player').classList.contains('ytbl-rendering')")
-            check('native captions hidden during bilingual display', driver.js("return getComputedStyle(document.querySelector('.ytp-caption-window-container')).visibility === 'hidden'"))
-            driver.js("document.querySelector('video').currentTime = 6")
-            driver.wait("document.querySelector('.ytbl-overlay').hidden")
-            check('subtitle gap clears overlay', True)
-            check('native captions remain visible when bilingual overlay has no text', driver.js("return getComputedStyle(document.querySelector('.ytp-caption-window-container')).visibility === 'visible'"))
-            driver.js("document.querySelector('video').currentTime = 150.5")
-            driver.wait("document.querySelector('.ytbl-translated').textContent === '远处的字幕。'")
-            driver.js("document.querySelector('video').currentTime = .5")
-            driver.wait("document.querySelector('.ytbl-translated').textContent === '你好，世界。'")
-            check('distant forward and backward seek use the already complete timeline', len(STATE['requests']) == after_japanese)
-            driver.js("const old=document.querySelector('video');const replacement=document.createElement('video');replacement.src='/fixture.webm';replacement.preload='auto';document.querySelector('.ytp-subtitles-button').setAttribute('aria-pressed','false');document.querySelector('.ytp-subtitles-button').setAttribute('aria-disabled','true');old.replaceWith(replacement);setTimeout(()=>document.querySelector('.ytp-subtitles-button').setAttribute('aria-disabled','false'),600)")
-            driver.wait("document.querySelector('.ytp-subtitles-button').getAttribute('aria-pressed') === 'true' && document.querySelector('video').duration > 160")
-            driver.wait("document.querySelector('.ytbl-translated').textContent === '你好，世界。'")
-            check('same-video element replacement and delayed CC readiness recover automatically', True)
-            driver.js("document.querySelector('video').currentTime = 8.1; document.querySelector('video').playbackRate = 2; document.querySelector('video').play()")
-            driver.wait("document.querySelector('video').currentTime > 8.6")
-            driver.js("document.querySelector('video').pause()")
-            paused_time = driver.js("return document.querySelector('video').currentTime")
-            time.sleep(.3)
-            check('native playback, 2x speed and pause keep subtitles synchronized', abs(driver.js("return document.querySelector('video').currentTime") - paused_time) < .02 and driver.js("return document.querySelector('.ytbl-translated').textContent === '跳转后的字幕。'"))
-            driver.js("document.querySelector('video').currentTime = .5")
-            driver.js("document.getElementById('movie_player').classList.add('ad-showing')")
-            driver.wait("document.querySelector('.ytbl-overlay').hidden")
-            driver.js("document.getElementById('movie_player').classList.remove('ad-showing')")
-            driver.wait("!document.querySelector('.ytbl-overlay').hidden")
-            check('advertisement suppresses overlay and resumes after ad', True)
-            driver.js("const b=document.createElement('button');b.id='fixture-fullscreen';b.textContent='Fullscreen';b.onclick=()=>document.getElementById('movie_player').requestFullscreen();document.querySelector('.ytp-right-controls').append(b)")
-            driver.click('#fixture-fullscreen')
-            driver.wait("document.fullscreenElement?.id === 'movie_player'")
-            check('overlay remains inside actual Firefox fullscreen element', driver.js("return document.fullscreenElement.contains(document.querySelector('.ytbl-overlay'))"))
-            driver.js("document.exitFullscreen()")
-            check('seeks, video rebinding, 2x playback, pause, ads and fullscreen send no extra API requests', len(STATE['requests']) == after_japanese)
-            (OUT / 'bilingual-player.png').write_bytes(base64.b64decode(driver.cmd('/screenshot')))
-            driver.click('.ytbl-toggle')
-            check('disable restores native caption visibility and prior CC state', driver.js("return getComputedStyle(document.querySelector('.ytp-caption-window-container')).visibility === 'visible' && document.querySelector('.ytp-subtitles-button').getAttribute('aria-pressed') === 'false'"))
-            STATE['caption_mode'] = 'xml'
-            driver.js("history.pushState({},'', '/watch?v=fixture0002'); document.dispatchEvent(new Event('yt-navigate-finish'))")
-            driver.click('.ytbl-toggle')
-            driver.wait("document.querySelector('.ytbl-original').textContent === 'XML caption.' && document.querySelector('.ytbl-translated').textContent === '测试译文：XML caption.'")
-            check('Firefox DOMParser reads YouTube XML timed captions', True)
-            STATE['caption_mode'] = 'json3'
-            driver.js("history.pushState({},'', '/watch?v=fixture0003'); document.dispatchEvent(new Event('yt-navigate-finish'))")
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('4 / 4')")
-            check('YouTube SPA navigation resets and reattaches current video', driver.js("return document.querySelectorAll('.ytbl-toggle').length === 1"))
-            driver.click('.ytbl-toggle')
-            STATE['caption_mode'] = 'empty'
-            driver.js("window.fixtureLiveOnly=true;history.pushState({},'', '/watch?v=fixture0004'); document.dispatchEvent(new Event('yt-navigate-finish'))")
-            no_source_before = len(STATE['requests'])
-            driver.click('.ytbl-toggle')
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('字幕') && !document.querySelector('.ytbl-status').textContent.includes('正在') && document.querySelector('.ytp-caption-segment').textContent === 'Live caption only.'", 25)
-            time.sleep(.8)
-            check('unavailable whole-track source sends no API request and never translates native DOM fragments', len(STATE['requests']) == no_source_before and driver.js("return document.querySelector('.ytbl-overlay').hidden && getComputedStyle(document.querySelector('.ytp-caption-window-container')).visibility === 'visible'"))
-            STATE['caption_mode'] = 'json3'
-            driver.click('.ytbl-toggle')
-            driver.js("window.fixtureLiveOnly=false;history.pushState({},'', '/watch?v=fixture0005'); document.dispatchEvent(new Event('yt-navigate-finish'))")
-            STATE['failure'] = 429
-            driver.click('.ytbl-toggle')
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('429')")
-            before = len(STATE['requests'])
-            time.sleep(1)
-            check('API error stops requests and exposes retry', len(STATE['requests']) == before and driver.js("return !document.querySelector('.ytbl-panel').hidden"))
-            driver.js("document.querySelector('.ytbl-retry').click()")
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('4 / 4')")
-            check('explicit retry recovers from API error', True)
-            driver.click('.ytbl-toggle')
-
-            # Navigate away during a slow translation; the persistent background
-            # must finish rather than cancelling ownership with the player page.
-            STATE['delay'] = 4
-            driver.cmd('/url', {'url': 'https://www.youtube.com/watch?v=fixture0006'})
-            driver.wait("document.querySelector('.ytbl-toggle')?.parentElement.classList.contains('ytp-right-controls')")
-            driver.click('.ytbl-toggle')
-            driver.wait("document.querySelector('.ytbl-progress')?.textContent === '正在翻译'")
-            driver.cmd('/url', {'url': options_url})
-            jobs = extension_message(driver, {'type': 'track:list'})
-            navigation_job = next(job for job in jobs if job['videoId'] == 'fixture0006')
-            wait_job(driver, navigation_job['id'])
-            check('navigation away does not cancel the full-track background translation', STATE['requests'][-1]['completed'])
-
-            # Close the originating tab while another options tab is still open.
-            options_handle = driver.cmd('/window')
-            handle = driver.cmd('/window/new', {'type': 'tab'})['handle']
-            driver.cmd('/window', {'handle': handle})
-            STATE['delay'] = 4
-            driver.cmd('/url', {'url': 'https://www.youtube.com/watch?v=fixture0007'})
-            driver.wait("document.querySelector('.ytbl-toggle')?.parentElement.classList.contains('ytp-right-controls')")
-            driver.click('.ytbl-toggle')
-            driver.wait("document.querySelector('.ytbl-progress')?.textContent === '正在翻译'")
-            driver.cmd('/window', method='DELETE')
-            driver.cmd('/window', {'handle': options_handle})
-            jobs = extension_message(driver, {'type': 'track:list'})
-            closed_job = next(job for job in jobs if job['videoId'] == 'fixture0007')
-            complete = wait_job(driver, closed_job['id'])
-            check('closing the video tab lets background finish and save all translations', complete['translatedCount'] == 4 and len(complete['translations']) == 4)
-            report['backgroundJob'] = {key: complete[key] for key in ['id', 'state', 'videoId', 'total', 'translatedCount']}
-
-            exports = []
-            for mode in ['original', 'translated', 'bilingual']:
-                result = extension_message(driver, {'type': 'track:export', 'id': closed_job['id'], 'mode': mode})
-                text = result['content']
-                check(f'{mode} SRT export retains distant timing and selected language', '00:02:30,000 --> 00:02:32,000' in text and ('Hello world.' in text) == (mode != 'translated') and ('你好，世界。' in text) == (mode != 'original') and (mode != 'bilingual' or 'Hello world.\r\n你好，世界。' in text))
-                downloaded = extension_message(driver, {'type': 'track:download', 'id': closed_job['id'], 'mode': mode, 'saveAs': False})
-                deadline = time.monotonic() + 10
-                entry = None
-                while time.monotonic() < deadline:
-                    rows = driver.async_js("const done=arguments[arguments.length-1];browser.downloads.search({id:arguments[0]}).then(done)", downloaded['downloadId'])
-                    entry = rows[0] if rows else None
-                    if entry and entry['state'] == 'complete':
-                        break
-                    time.sleep(.1)
-                check(f'{mode} SRT downloads through the actual Firefox downloads API', entry and entry['state'] == 'complete' and pathlib.Path(entry['filename']).read_text(encoding='utf-8').replace('\n', '\r\n') == text)
-                exports.append({'mode': mode, 'filename': entry['filename'], 'downloadId': downloaded['downloadId']})
-            report['exports'] = exports
-
-            cached_before = len(STATE['requests'])
-            driver.cmd('/url', {'url': 'https://www.youtube.com/watch?v=fixture0007'})
-            driver.wait("document.querySelector('.ytbl-toggle')?.parentElement.classList.contains('ytp-right-controls')")
-            driver.click('.ytbl-toggle')
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('4 / 4')")
-            check('reopening the video reuses the saved full-track result without API calls', len(STATE['requests']) == cached_before)
-            check('player exposes SRT mode selection and export action', driver.js("return [...document.querySelector('.ytbl-export-mode').options].map(o=>o.value).sort().join(',') === 'bilingual,original,translated' && !document.querySelector('.ytbl-export').disabled"))
-
-            # A real Firefox shutdown/restart reuses this test's own profile.
-            # The temporary unsigned add-on is reinstalled, as in manual loading.
-            driver.call('/session/' + driver.session, method='DELETE')
-            driver.session = None
-            restarted = driver.call('/session', {'capabilities': {'alwaysMatch': capabilities}})
-            driver.session = restarted['sessionId']
-            driver.cmd('/moz/addon/install', {'path': str(addon), 'temporary': True})
-            options_url = extension_url(driver)
-            driver.cmd('/url', {'url': options_url})
-            driver.wait("document.getElementById('model').value === 'fixture-model'")
-            restored = wait_job(driver, closed_job['id'])
-            check('Firefox restart restores the completed track and saved API configuration', restored['translatedCount'] == 4 and len(restored['cues']) == 4)
-            driver.cmd('/url', {'url': 'https://www.youtube.com/watch?v=fixture0007'})
-            driver.wait("document.querySelector('.ytbl-toggle')?.parentElement.classList.contains('ytp-right-controls')")
-            driver.click('.ytbl-toggle')
-            driver.wait("document.querySelector('.ytbl-status').textContent.includes('4 / 4')")
-            check('cached subtitles render after Firefox restart with no translation request', len(STATE['requests']) == cached_before)
-            check('mock requests use configured Chat Completions endpoint and model', all(r['path'] == '/v1/chat/completions' and r['model'] == 'fixture-model' for r in STATE['requests']))
-            driver.click('.ytbl-toggle')
+            from firefox_buffered_cases import run_fixture_cases
+            options_url, buffered_report = run_fixture_cases(
+                driver, options_url, STATE, check, extension_message, wait_job,
+                capabilities, addon, extension_url, OUT, len(FIXTURE_CUES))
+            report.update(buffered_report)
         if options.live:
             report['live']['attempted'] = True
             driver.cmd('/moz/context', {'context': 'chrome'})
@@ -552,6 +425,11 @@ def main():
                 time.sleep(1)
                 driver.wait("document.querySelector('.ytbl-toggle')?.parentElement.classList.contains('ytp-right-controls')", 20)
                 driver.wait("document.querySelector('.ytbl-track')?.options[0]?.value", 20)
+                translation_started = time.monotonic()
+                playback_started = driver.js("return document.querySelector('#movie_player video')?.currentTime || 0")
+                report['live']['playbackPositionAtEnable'] = playback_started
+                report['live']['sourceSelectionAtEnable'] = driver.js("const select=document.querySelector('.ytbl-track');let native=null;try{const track=document.getElementById('movie_player').getOption('captions','track');native=track?{language:track.languageCode||null,automatic:track.kind==='asr'}:null}catch{}return {value:select?.value,label:select?.selectedOptions[0]?.textContent,native}")
+                report['live']['enabledAtEpochMs'] = driver.js('return Date.now()')
                 if driver.js("return document.querySelector('.ytbl-toggle').getAttribute('aria-pressed') !== 'true'"):
                     driver.click('.ytbl-toggle')
                 driver.wait("document.querySelector('.ytbl-toggle').getAttribute('aria-pressed') === 'true'", 3)
@@ -561,42 +439,61 @@ def main():
                         driver.click('.ytp-play-button')
                     time.sleep(.5)
                 if not driver.js("return document.getElementById('movie_player').classList.contains('ad-showing')"):
-                    driver.js("const video=document.querySelector('#movie_player video');video.currentTime = 40;video.pause()")
+                    # Measure the cue at the actual advancing playback position.
+                    # A completed segment already behind the viewer is not a
+                    # usable first result, and this probe must not pause/rewind
+                    # playback to make an old translation appear successful.
                     deadline = time.monotonic() + (620 if options.real_api else 60)
                     next_progress = time.monotonic() + 15
-                    while time.monotonic() < deadline and not driver.js("return document.querySelector('.ytbl-status')?.textContent.includes('已翻译')"):
-                        if driver.js("return document.querySelector('.ytbl-status')?.dataset.error === 'true'"):
+                    while time.monotonic() < deadline:
+                        sample = driver.js("const video=document.querySelector('#movie_player video');return {observedAt:Date.now(),time:video?.currentTime,paused:video?.paused,visible:!document.querySelector('.ytbl-overlay')?.hidden,original:document.querySelector('.ytbl-original')?.textContent,translated:document.querySelector('.ytbl-translated')?.textContent,ad:document.getElementById('movie_player').classList.contains('ad-showing')}")
+                        if sample['visible'] and sample['original'] and sample['translated'] and sample['translated'] != '翻译中…' and not sample['ad'] and not sample['paused']:
+                            report['live']['firstUsableSeconds'] = round(time.monotonic() - translation_started, 3)
+                            report['live']['firstUsablePosition'] = sample['time']
+                            report['live']['firstOnscreenAtEpochMs'] = sample['observedAt']
+                            report['live']['firstUsableWithin20Seconds'] = report['live']['firstUsableSeconds'] <= 20
+                            report['live']['playbackAdvanced'] = sample['time'] > playback_started
                             break
                         if time.monotonic() >= next_progress:
                             print('LIVE PROGRESS:', driver.js("return document.querySelector('.ytbl-status')?.textContent"), flush=True)
                             next_progress = time.monotonic() + 15
                         time.sleep(.5)
-                    # YouTube can reset a seek during player/ad initialization.
-                    # Sample a fixed cue only after the complete track is ready.
-                    driver.js("const video=document.querySelector('#movie_player video');video.currentTime = 40;video.pause()")
-                    time.sleep(.5)
                 report['live']['status'] = driver.js("return document.querySelector('.ytbl-status')?.textContent")
                 report['live']['originalVisible'] = driver.js("return document.querySelector('.ytbl-original')?.textContent")
                 report['live']['translatedVisible'] = driver.js("return document.querySelector('.ytbl-translated')?.textContent")
                 report['live']['player'] = driver.js("return {time:document.querySelector('#movie_player video')?.currentTime,cc:document.querySelector('.ytp-subtitles-button')?.getAttribute('aria-pressed'),ad:document.getElementById('movie_player').classList.contains('ad-showing'),native:[...document.querySelectorAll('.ytp-caption-segment')].map(e=>e.textContent).join(' '),error:document.querySelector('.ytp-error-content')?.textContent}")
-                report['live']['subtitleVerified'] = bool(report['live']['originalVisible'] and report['live']['translatedVisible'] and report['live']['translatedVisible'] != '翻译中…' and not report['live']['player']['ad'])
+                report['live']['subtitleVerified'] = bool(report['live'].get('firstUsableSeconds') is not None and report['live'].get('playbackAdvanced'))
                 print('LIVE:', json.dumps(report['live'], ensure_ascii=False), flush=True)
                 (OUT / 'live-youtube.png').write_bytes(base64.b64decode(driver.cmd('/screenshot')))
                 driver.click('.ytbl-toggle')
                 if report['live']['subtitleVerified']:
                     driver.cmd('/url', {'url': options_url})
                     jobs = extension_message(driver, {'type': 'track:list'})
-                    job = next((j for j in jobs if j['videoId'] == options.video and j['state'] == 'complete'), None)
-                    check('live video saves every translated cue from the complete source track',
-                          job and job['total'] > 0 and job['translatedCount'] == job['total'])
-                    complete = extension_message(driver, {'type': 'track:status', 'id': job['id']})
-                    report['live']['backgroundJob'] = {key: complete[key] for key in ['state', 'videoId', 'total', 'translatedCount']}
-                    report['live']['lastCueEnd'] = complete['cues'][-1]['end']
-                    for mode in ['original', 'translated', 'bilingual']:
-                        exported = extension_message(driver, {'type': 'track:export', 'id': job['id'], 'mode': mode})
-                        check(f'live video {mode} SRT exports all saved cues', len(re.findall(r'(?m)^\d{2,}:\d{2}:\d{2},\d{3} --> ', exported['content'])) == job['total'])
+                    job = next((j for j in jobs if j['videoId'] == options.video), None)
+                    check('live video exposes a saved partial or complete background task', job and job['translatedCount'] > 0)
+                    if options.first_only:
+                        partial = extension_message(driver, {'type': 'track:status', 'id': job['id']})
+                        check('first-only probe verifies durable translations before cancellation', len(partial.get('translations', [])) == partial['translatedCount'] and 0 < partial['translatedCount'] <= partial['total'])
+                        report['live']['backgroundJob'] = {key: partial[key] for key in ['state', 'videoId', 'total', 'translatedCount']}
+                        report['live']['metrics'] = partial.get('metrics', {})
+                        add_live_timing_evidence(report['live'], partial)
+                        cancelled = extension_message(driver, {'type': 'track:cancel', 'id': job['id']})
+                        check('first-only probe explicitly cancels remaining translation work', cancelled['state'] in ['cancelled', 'complete'])
+                        report['live']['cancellation'] = {key: cancelled[key] for key in ['state', 'total', 'translatedCount']}
+                        report['live']['exportsSkipped'] = True
+                    else:
+                        complete = wait_job(driver, job['id'], timeout=620 if options.real_api else 60)
+                        check('live video saves every translated cue from the complete source track',
+                              complete['total'] > 0 and complete['translatedCount'] == complete['total'])
+                        report['live']['backgroundJob'] = {key: complete[key] for key in ['state', 'videoId', 'total', 'translatedCount']}
+                        report['live']['metrics'] = complete.get('metrics', {})
+                        add_live_timing_evidence(report['live'], complete)
+                        report['live']['lastCueEnd'] = complete['cues'][-1]['end']
+                        for mode in ['original', 'translated', 'bilingual']:
+                            exported = extension_message(driver, {'type': 'track:export', 'id': job['id'], 'mode': mode})
+                            check(f'live video {mode} SRT exports all saved cues', len(re.findall(r'(?m)^\d{2,}:\d{2}:\d{2},\d{3} --> ', exported['content'])) == complete['total'])
                     if not options.real_api:
-                        check('live complete track uses one translation API request', sum(r['count'] == job['total'] for r in STATE['requests']) == 1)
+                        report['live']['mockTranslationRequestCount'] = len(STATE['requests'])
                 if not report['live']['originalVisible']:
                     if driver.js("return document.querySelector('.ytp-subtitles-button')?.getAttribute('aria-pressed') !== 'true'"):
                         driver.click('.ytp-subtitles-button')
@@ -609,7 +506,7 @@ def main():
             except (RuntimeError, AssertionError) as error:
                 report['live']['error'] = str(error)[:1500]
             if options.live_only:
-                check('public YouTube complete-track bilingual subtitles are verified', report['live'].get('subtitleVerified', False) and not report['live'].get('error'))
+                check('public YouTube buffered bilingual subtitles are verified during continuing playback', report['live'].get('subtitleVerified', False) and not report['live'].get('error'))
         report['passed'] = True
     except Exception as error:
         report['passed'] = False

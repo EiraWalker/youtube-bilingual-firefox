@@ -1,0 +1,208 @@
+{
+  "version": "0.3.0",
+  "date": "2026-10-10",
+  "unitTests": 90,
+  "firefoxMock": {
+    "passed": true,
+    "checks": 42,
+    "peakConcurrency": 6,
+    "profileRemoved": true
+  },
+  "realService": {
+    "endpoint": "http://127.0.0.1:8045/v1",
+    "model": "gemini-3.8-flash-high"
+  },
+  "realProbes": [
+    {
+      "tag": "buffered-real-a-1",
+      "passed": true,
+      "profileRemoved": true,
+      "firefoxVersion": "157.0.1",
+      "firstOnscreenSeconds": 28.094,
+      "firstRangeReadySeconds": null,
+      "taskStartToRangeReadySeconds": 23.559,
+      "sourceTrack": null,
+      "sourceTiming": null,
+      "phaseTimingsSeconds": null,
+      "backgroundJob": {
+        "state": "complete",
+        "videoId": "6AgOfiZOWiY",
+        "total": 993,
+        "translatedCount": 993
+      },
+      "firstOnly": false
+    },
+    {
+      "tag": "buffered-real-b-full",
+      "passed": true,
+      "profileRemoved": true,
+      "firefoxVersion": "157.0.1",
+      "firstOnscreenSeconds": 31.125,
+      "firstRangeReadySeconds": null,
+      "taskStartToRangeReadySeconds": 13.093,
+      "sourceTrack": null,
+      "sourceTiming": null,
+      "phaseTimingsSeconds": null,
+      "backgroundJob": {
+        "state": "complete",
+        "videoId": "uwS__WiOYTI",
+        "total": 26,
+        "translatedCount": 26
+      },
+      "firstOnly": false
+    },
+    {
+      "tag": "buffered-real-a-cold-1",
+      "passed": true,
+      "profileRemoved": true,
+      "firefoxVersion": "157.0.1",
+      "firstOnscreenSeconds": 21.109,
+      "firstRangeReadySeconds": null,
+      "taskStartToRangeReadySeconds": 18.33,
+      "sourceTrack": null,
+      "sourceTiming": null,
+      "phaseTimingsSeconds": null,
+      "backgroundJob": {
+        "state": "translating",
+        "videoId": "6AgOfiZOWiY",
+        "total": 993,
+        "translatedCount": 6
+      },
+      "firstOnly": true
+    },
+    {
+      "tag": "buffered-real-a-cold-2",
+      "passed": true,
+      "profileRemoved": true,
+      "firefoxVersion": "157.0.1",
+      "firstOnscreenSeconds": 20.188,
+      "firstRangeReadySeconds": null,
+      "taskStartToRangeReadySeconds": 17.591,
+      "sourceTrack": null,
+      "sourceTiming": null,
+      "phaseTimingsSeconds": null,
+      "backgroundJob": {
+        "state": "translating",
+        "videoId": "6AgOfiZOWiY",
+        "total": 993,
+        "translatedCount": 19
+      },
+      "firstOnly": true
+    },
+    {
+      "tag": "buffered-real-a-cold-3",
+      "passed": true,
+      "profileRemoved": true,
+      "firefoxVersion": "157.0.1",
+      "firstOnscreenSeconds": 22.734,
+      "firstRangeReadySeconds": null,
+      "taskStartToRangeReadySeconds": 18.936,
+      "sourceTrack": null,
+      "sourceTiming": null,
+      "phaseTimingsSeconds": null,
+      "backgroundJob": {
+        "state": "translating",
+        "videoId": "6AgOfiZOWiY",
+        "total": 993,
+        "translatedCount": 19
+      },
+      "firstOnly": true
+    },
+    {
+      "tag": "buffered-real-b-cold-1",
+      "passed": true,
+      "profileRemoved": true,
+      "firefoxVersion": "157.0.1",
+      "firstOnscreenSeconds": 31.0,
+      "firstRangeReadySeconds": null,
+      "taskStartToRangeReadySeconds": 12.41,
+      "sourceTrack": null,
+      "sourceTiming": null,
+      "phaseTimingsSeconds": null,
+      "backgroundJob": {
+        "state": "complete",
+        "videoId": "uwS__WiOYTI",
+        "total": 26,
+        "translatedCount": 26
+      },
+      "firstOnly": true
+    },
+    {
+      "tag": "buffered-real-b-cold-2",
+      "passed": true,
+      "profileRemoved": true,
+      "firefoxVersion": "157.0.1",
+      "firstOnscreenSeconds": 31.578,
+      "firstRangeReadySeconds": null,
+      "taskStartToRangeReadySeconds": 14.178,
+      "sourceTrack": null,
+      "sourceTiming": null,
+      "phaseTimingsSeconds": null,
+      "backgroundJob": {
+        "state": "complete",
+        "videoId": "uwS__WiOYTI",
+        "total": 26,
+        "translatedCount": 26
+      },
+      "firstOnly": true
+    },
+    {
+      "tag": "buffered-real-b-cold-3",
+      "passed": true,
+      "profileRemoved": true,
+      "firefoxVersion": "157.0.1",
+      "firstOnscreenSeconds": 33.235,
+      "firstRangeReadySeconds": null,
+      "taskStartToRangeReadySeconds": 13.829,
+      "sourceTrack": null,
+      "sourceTiming": null,
+      "phaseTimingsSeconds": null,
+      "backgroundJob": {
+        "state": "complete",
+        "videoId": "uwS__WiOYTI",
+        "total": 26,
+        "translatedCount": 26
+      },
+      "firstOnly": true
+    },
+    {
+      "tag": "buffered-real-b-timing",
+      "passed": true,
+      "profileRemoved": true,
+      "firefoxVersion": "157.0.1",
+      "firstOnscreenSeconds": 31.422,
+      "firstRangeReadySeconds": 20.18,
+      "taskStartToRangeReadySeconds": 14.826,
+      "sourceTrack": {
+        "automatic": false,
+        "id": ".en",
+        "language": "en"
+      },
+      "sourceTiming": {
+        "cueCount": 26,
+        "firstCueStart": 31.945,
+        "lastCueEnd": 250.847,
+        "firstRelevantCueStart": 31.945,
+        "firstRelevantCueEnd": 36.908,
+        "startedInSubtitleGap": true,
+        "sourceSecondsUntilNextCueAtEnable": 30.902042
+      },
+      "phaseTimingsSeconds": {
+        "enableToTaskStart": 5.354,
+        "taskStartToFirstSaved": 9.514,
+        "taskStartToFirstRangeReady": 14.826,
+        "enableToFirstSaved": 14.868,
+        "enableToFirstRangeReady": 20.18,
+        "enableToFirstOnscreen": 31.346,
+        "rangeReadyToFirstOnscreen": 11.166
+      },
+      "backgroundJob": {
+        "state": "complete",
+        "videoId": "uwS__WiOYTI",
+        "total": 26,
+        "translatedCount": 26
+      },
+      "firstOnly": true
+    }
+  ]
+}
