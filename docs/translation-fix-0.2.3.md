@@ -38,6 +38,6 @@
 
 SHA256：`9e86cd89e6dd0fcb34f0b2aaf085608e9a3f28459e1fa162d063a9f85dcd42be`。
 
-在 `about:debugging#/runtime/this-firefox` 重新载入本地 `build/firefox/manifest.json`，或移除旧临时扩展后载入 0.2.3 ZIP；随后刷新视频页面。重载后台会将历史未完成任务标记为中断，完整译文继续保留。对失败视频点击“重试”。无需清除已完成缓存或重新填写 API 配置。
+在 `about:debugging#/runtime/this-firefox` 重新载入本地 `build/firefox/manifest.json`，或点击“临时载入附加组件”选择 0.2.3 ZIP，更新同 ID 的扩展；随后刷新视频页面。重载后台会将历史未完成任务标记为中断，完整译文继续保留。对失败视频点击“重试”。保留现有扩展配置与已完成缓存。
 
 本次两个视频已验证能取到完整轨道。该备用客户端同样是 YouTube 内部接口，其他受限视频及以后站点变更仍需单独验证。
