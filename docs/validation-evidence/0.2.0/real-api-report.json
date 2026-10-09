@@ -1,0 +1,114 @@
+{
+  "checks": [
+    "production bundle installs in Firefox",
+    "settings UI saves API and grants configured host",
+    "test connection uses Firefox background fetch to configured API",
+    "real API produces Chinese bilingual subtitles inside Firefox player"
+  ],
+  "live": {
+    "attempted": true,
+    "title": "How Great Leaders Inspire Action | Simon Sinek | TED - YouTube",
+    "controlPresent": true,
+    "tracks": [
+      "Albanian",
+      "Arabic",
+      "Armenian",
+      "Bangla",
+      "Bulgarian",
+      "Catalan",
+      "Chinese (China)",
+      "Chinese (Taiwan)",
+      "Croatian",
+      "Czech",
+      "Danish",
+      "Dutch",
+      "English",
+      "Esperanto",
+      "Estonian",
+      "French",
+      "Georgian",
+      "German",
+      "Greek",
+      "Hebrew",
+      "Hindi",
+      "Hungarian",
+      "Indonesian",
+      "Italian",
+      "Japanese",
+      "Korean",
+      "Kurdish",
+      "Latvian",
+      "Lithuanian",
+      "Macedonian",
+      "Marathi",
+      "Mongolian",
+      "Norwegian",
+      "Persian",
+      "Polish",
+      "Portuguese (Brazil)",
+      "Portuguese (Portugal)",
+      "Romanian",
+      "Russian",
+      "Serbian",
+      "Slovak",
+      "Slovenian",
+      "Spanish",
+      "Swedish",
+      "Tamil",
+      "Thai",
+      "Turkish",
+      "Ukrainian",
+      "Vietnamese"
+    ],
+    "status": "无法获取完整字幕：YouTube 返回空字幕响应。 请确认原生 CC 可用后重试；站点可能限制字幕请求。",
+    "originalVisible": "",
+    "translatedVisible": "",
+    "player": {
+      "ad": false,
+      "cc": "true",
+      "error": null,
+      "native": "",
+      "time": 37.55375
+    },
+    "subtitleVerified": false,
+    "nativeBaseline": {
+      "captionResponses": [
+        {
+          "bytes": 0
+        },
+        {
+          "bytes": 0
+        },
+        {
+          "bytes": 0
+        },
+        {
+          "bytes": 0
+        },
+        {
+          "bytes": 0
+        }
+      ],
+      "cc": "true",
+      "text": "",
+      "track": {
+        "kind": "",
+        "languageCode": "en",
+        "name": ""
+      }
+    }
+  },
+  "firefoxVersion": "157.0.1",
+  "translationService": {
+    "real": true,
+    "endpoint": "http://127.0.0.1:8045/v1",
+    "model": "gemini-3.8-flash-high"
+  },
+  "realApiPlayer": {
+    "embedded": true,
+    "original": "Hello world.",
+    "translated": "你好，世界。"
+  },
+  "passed": true,
+  "apiRequestCount": 0
+}

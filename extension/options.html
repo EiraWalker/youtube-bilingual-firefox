@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YouTube 双语字幕设置</title><link rel="stylesheet" href="ui.css"></head>
+<body><main><div class="eyebrow">FIREFOX · LOCAL</div><h1>YouTube 双语字幕</h1><p class="intro">在播放器内显示原文和译文，使用你指定的 OpenAI 兼容 API。</p>
+<form id="settings-form">
+<fieldset><legend>翻译 API</legend>
+<label>API 地址<input id="apiBaseUrl" type="url" required placeholder="https://api.example.com/v1"><span>可填写服务根地址、/v1 地址或完整 /chat/completions 地址。</span></label>
+<label>API Key<input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="本地免鉴权服务可留空"><span>保存在当前 Firefox 配置中；不会传给 YouTube 页面。</span></label>
+<label>模型名称<input id="model" type="text" required spellcheck="false" placeholder="填写服务商提供的模型 ID"></label>
+<label>目标语言<input id="targetLanguage" type="text" required value="zh-CN" placeholder="zh-CN / English / 日本語"></label>
+</fieldset>
+<fieldset><legend>字幕与显示</legend>
+<label>优先原字幕语言<input id="sourceLanguage" type="text" value="auto" placeholder="auto / en / ja"><span>auto 沿用播放器选择；也可在播放器面板中切换字幕轨道。</span></label>
+<div class="row"><label>字体大小（px）<input id="fontSize" type="number" min="14" max="48" value="24"></label><label>距播放器底部（px）<input id="bottomOffset" type="number" min="20" max="240" value="70"></label></div>
+<label class="check"><input id="autoEnable" type="checkbox">打开 YouTube 视频时自动启用</label>
+<p class="hint">启用后获取完整字幕，通常一次请求翻译整段视频，可能产生 API 费用。翻译期间视频继续播放；关闭视频标签页后任务仍在后台继续。</p>
+</fieldset>
+<div class="actions"><button type="submit" id="save">保存设置</button><button type="button" id="test" class="secondary">测试连接</button></div>
+<p id="status" role="status"></p>
+</form><p class="footnote">播放器中单击「双语字幕」开启；右键该按钮可选择原字幕语言、重新翻译或导出 SRT。没有原字幕的视频暂不支持。</p>
+<section class="subtitle-library" aria-labelledby="library-title"><h2 id="library-title">后台任务与已保存字幕</h2><p class="hint">完整译文保存在当前 Firefox 中。视频标签页关闭后，可在这里查看完成结果、取消任务或导出字幕。Firefox 退出后正在进行的任务会停止。</p><div class="actions"><button type="button" id="refresh-library" class="secondary">刷新列表</button><button type="button" id="clear-library" class="secondary">清除已保存译文</button></div><p id="library-status" role="status"></p><div id="library-list"></div></section>
+</main><script src="options.js"></script></body></html>

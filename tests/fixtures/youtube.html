@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>YouTube player fixture</title><style>body{margin:0;background:#101820;color:#fff;font:16px Arial}h1,p{margin:24px}#movie_player{position:relative;width:960px;height:540px;margin:24px;background:linear-gradient(135deg,#233b50,#162029)}video{width:100%;height:100%}.ytp-chrome-bottom{position:absolute;bottom:0;width:100%;height:48px;background:#0008}.ytp-right-controls{float:right;height:48px;display:flex;align-items:center}.ytp-subtitles-button{margin:8px;background:#333;color:white;border:1px solid #888}.ytp-caption-window-container{position:absolute;bottom:60px;left:20%;background:black}</style></head>
+<body><h1>Firefox integration fixture</h1><p>Local synthetic player and subtitle fixture; no remote video.</p><div id="movie_player"><video src="/fixture.webm" preload="auto"></video><div class="ytp-caption-window-container"><span class="ytp-caption-segment"></span></div><div class="ytp-chrome-bottom"><div class="ytp-right-controls"><button class="ytp-subtitles-button" aria-pressed="false">CC</button></div></div></div>
+<script>
+const player = document.getElementById('movie_player');
+const lateControls = document.querySelector('.ytp-right-controls');
+lateControls.classList.remove('ytp-right-controls');
+setTimeout(() => lateControls.classList.add('ytp-right-controls'), 1200);
+const media = document.querySelector('video');
+const cc = document.querySelector('.ytp-subtitles-button');
+const sourceTracks = [{vssId:'.en',languageCode:'en',name:{simpleText:'English'},baseUrl:'https://www.youtube.com/api/timedtext?v=fixture0001&lang=en'}, {vssId:'.ja',languageCode:'ja',name:{simpleText:'Japanese'},baseUrl:'https://www.youtube.com/api/timedtext?v=fixture0001&lang=ja'}];
+sourceTracks.reverse();
+let selectedTrack = {...sourceTracks.find(t=>t.languageCode==='en'), name:''};
+player.getPlayerResponse = () => ({ videoDetails: { videoId: new URL(location.href).searchParams.get('v'), title: 'Whole track fixture' }, captions: { playerCaptionsTracklistRenderer: { captionTracks: sourceTracks.map(track=>({...track,baseUrl:'https://www.youtube.com/api/timedtext?v='+new URL(location.href).searchParams.get('v')+'&lang='+track.languageCode})) } } });
+player.getOption = (_module,key) => key === 'tracklist' ? sourceTracks.map(t=>({...t,name:''})) : (cc.getAttribute('aria-pressed') === 'true' ? selectedTrack : {});
+player.loadModule = () => {};
+player.setOption = (_module, _key, track) => { if(typeof track.name === 'object') throw new Error('Player track name must be a string'); selectedTrack = track; if (!window.fixtureLiveOnly) fetch('https://www.youtube.com/api/timedtext?v=' + new URL(location.href).searchParams.get('v') + '&lang=' + track.languageCode + '&fmt=json3'); };
+cc.addEventListener('click', () => { cc.setAttribute('aria-pressed', cc.getAttribute('aria-pressed') === 'true' ? 'false' : 'true'); if (cc.getAttribute('aria-pressed') === 'true') player.setOption('captions', 'track', selectedTrack); });
+// A minimal native-caption renderer lets the test check native CC during the
+// whole-track wait. The four-cue timeline includes a line beyond the old 75s window.
+setInterval(() => {
+  const current = document.querySelector('video');
+  const time = current?.currentTime || 0;
+  const cue = [[0, 2, 'Hello world.'], [3, 5, 'Second subtitle.'], [8, 10, 'After seeking.'], [150, 152, 'A distant subtitle.']].find(([start, end]) => time >= start && time < end);
+  document.querySelector('.ytp-caption-segment').textContent = cc.getAttribute('aria-pressed') === 'true' ? (window.fixtureLiveOnly ? 'Live caption only.' : cue?.[2] || '') : '';
+}, 80);
+</script></body></html>

@@ -1,0 +1,16 @@
+node_modules/
+.npm-cache/
+build/
+dist/
+output/
+.tools/
+*.local.json
+*.log
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.codebase-memory/

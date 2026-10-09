@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.webm binary
+*.png binary
+*.zip binary
+*.srt text eol=crlf whitespace=-blank-at-eof
