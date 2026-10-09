@@ -34,6 +34,27 @@ async function done(service, id) {
   return service.status(id);
 }
 
+test('a stalled API response body cannot block the queue after deadline or cancellation', async () => {
+  for (const stop of ['timeout', 'cancel']) {
+    let calls = 0;
+    const service = createService({ timeoutMs: stop === 'timeout' ? 30 : 600_000, fetchImpl: async (_url, options) => {
+      calls++;
+      if (calls === 1) return { ok: true, json: () => new Promise(() => {}) };
+      return translatedResponse(options);
+    } });
+    const first = await service.start(request({ videoId: `stalled-${stop}` }));
+    await until(() => calls === 1);
+    const next = await service.start(request({ videoId: `waiting-${stop}` }));
+    if (stop === 'cancel') await service.cancel(first.id);
+    const complete = await done(service, next.id);
+    assert.equal(complete.state, 'complete');
+    assert.equal(calls, 2);
+    const stopped = await service.status(first.id);
+    assert.equal(stopped.state, stop === 'timeout' ? 'failed' : 'cancelled');
+    if (stop === 'timeout') assert.match(stopped.error, /超时/);
+  }
+});
+
 test('start returns an independent background task, deduplicates simultaneous starts, and persists the whole result without credentials', async () => {
   const local = storage();
   let release, calls = 0;

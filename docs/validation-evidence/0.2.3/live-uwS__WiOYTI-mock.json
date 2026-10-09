@@ -1,0 +1,53 @@
+{
+  "checks": [
+    "production bundle installs in Firefox",
+    "settings UI saves API and grants configured host",
+    "test connection uses Firefox background fetch to configured API",
+    "each repeated test-connection click makes a new API request",
+    "live video saves every translated cue from the complete source track",
+    "live video original SRT exports all saved cues",
+    "live video translated SRT exports all saved cues",
+    "live video bilingual SRT exports all saved cues",
+    "live complete track uses one translation API request",
+    "public YouTube complete-track bilingual subtitles are verified"
+  ],
+  "live": {
+    "attempted": true,
+    "title": "Cody・Lee(李) - 我愛你(MusicVideo) - YouTube",
+    "controlPresent": true,
+    "tracks": [
+      "Chinese (Traditional)",
+      "Chinese (Taiwan)",
+      "English",
+      "Spanish",
+      "Thai"
+    ],
+    "status": "已翻译 26 / 26 条字幕",
+    "originalVisible": "The after image of the destination board",
+    "translatedVisible": "测试译文：The after image of the destination board",
+    "player": {
+      "ad": false,
+      "cc": "true",
+      "error": null,
+      "native": "",
+      "time": 47.466791
+    },
+    "subtitleVerified": true,
+    "backgroundJob": {
+      "state": "complete",
+      "videoId": "uwS__WiOYTI",
+      "total": 26,
+      "translatedCount": 26
+    },
+    "lastCueEnd": 250.847
+  },
+  "firefoxVersion": "157.0.1",
+  "translationService": {
+    "real": false,
+    "endpoint": "http://127.0.0.1:2078/v1",
+    "model": "fixture-model"
+  },
+  "passed": true,
+  "apiRequestCount": 4,
+  "isolatedProfileRemoved": true
+}

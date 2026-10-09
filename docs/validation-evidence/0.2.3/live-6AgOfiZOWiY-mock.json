@@ -1,0 +1,50 @@
+{
+  "checks": [
+    "production bundle installs in Firefox",
+    "settings UI saves API and grants configured host",
+    "test connection uses Firefox background fetch to configured API",
+    "each repeated test-connection click makes a new API request",
+    "live video saves every translated cue from the complete source track",
+    "live video original SRT exports all saved cues",
+    "live video translated SRT exports all saved cues",
+    "live video bilingual SRT exports all saved cues",
+    "live complete track uses one translation API request",
+    "public YouTube complete-track bilingual subtitles are verified"
+  ],
+  "live": {
+    "attempted": true,
+    "title": "OpenAI researcher on agent swarms & recursive self-improvement - YouTube",
+    "controlPresent": true,
+    "tracks": [
+      "English",
+      "English (auto-generated)（自动生成）"
+    ],
+    "status": "已翻译 993 / 993 条字幕",
+    "originalVisible": "The way I think about it, when you plot the \nperformance of these reasoning models with",
+    "translatedVisible": "测试译文：The way I think about it, when you plot the \nperformance of these reasoning models with",
+    "player": {
+      "ad": false,
+      "cc": "true",
+      "error": null,
+      "native": "",
+      "time": 52.015812
+    },
+    "subtitleVerified": true,
+    "backgroundJob": {
+      "state": "complete",
+      "videoId": "6AgOfiZOWiY",
+      "total": 993,
+      "translatedCount": 993
+    },
+    "lastCueEnd": 4809.6
+  },
+  "firefoxVersion": "157.0.1",
+  "translationService": {
+    "real": false,
+    "endpoint": "http://127.0.0.1:14084/v1",
+    "model": "fixture-model"
+  },
+  "passed": true,
+  "apiRequestCount": 4,
+  "isolatedProfileRemoved": true
+}

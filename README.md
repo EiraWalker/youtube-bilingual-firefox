@@ -1,6 +1,6 @@
 # YouTube 双语字幕 · Local
 
-Firefox 0.2.2 扩展：取得一个原字幕语言轨道的完整字幕，通常用一次 OpenAI 兼容 Chat Completions 请求翻译整片，在 YouTube 播放器内显示双语字幕，保存译文并导出 SRT。默认目标语言为简体中文，可修改。
+Firefox 0.2.3 扩展：取得一个原字幕语言轨道的完整字幕，通常用一次 OpenAI 兼容 Chat Completions 请求翻译整片，在 YouTube 播放器内显示双语字幕，保存译文并导出 SRT。默认目标语言为简体中文，可修改。
 
 项目目录：`E:\plugin\immersive-translate-local`。
 
@@ -11,14 +11,14 @@ GitHub 私有仓库：[EiraWalker/youtube-bilingual-firefox](https://github.com/
 需要 Firefox 142 或更新版本。开发版采用临时加载方式：
 
 1. 打开 Firefox，进入 `about:debugging#/runtime/this-firefox`。
-2. 点击「临时载入附加组件」，选择 `E:\plugin\immersive-translate-local\build\firefox\manifest.json`，或选择 `dist\youtube-bilingual-firefox-0.2.2.zip`。
+2. 点击「临时载入附加组件」，选择 `E:\plugin\immersive-translate-local\build\firefox\manifest.json`，或选择 `dist\youtube-bilingual-firefox-0.2.3.zip`。
 3. 点击扩展图标 →「API 与已保存字幕」。填写 API 地址、模型名称和 API Key，保存时授予该 API 网站的访问权限。本地免鉴权服务的 Key 可留空。
 4. 点击「测试连接」，确认能返回译文。
 5. 打开或刷新 YouTube 视频页面，单击播放器里的「双语字幕」按钮。
 
 本次测试地址为 `http://127.0.0.1:8045/v1`，模型为 `gemini-3.8-flash-high`。Key 请在设置页填写，项目文件中不包含个人 Key。
 
-字幕功能的测试结果与实际网站验证边界见 [0.2.0 验证记录](docs/validation-0.2.md)，配置页的样式与交互验证见 [0.2.1 配置页改版](docs/options-style-0.2.1.md)，工具栏弹出页见 [0.2.2 弹出页改版](docs/popup-style-0.2.2.md)。
+最新字幕修复与实际网站验证见 [0.2.3 验证记录](docs/translation-fix-0.2.3.md)，原整轨功能记录见 [0.2.0 验证记录](docs/validation-0.2.md)，配置页的样式与交互验证见 [0.2.1 配置页改版](docs/options-style-0.2.1.md)，工具栏弹出页见 [0.2.2 弹出页改版](docs/popup-style-0.2.2.md)。
 
 右键「双语字幕」按钮可选择原字幕语言、重试、重新翻译、取消翻译或导出 SRT。导出内容可选原文、译文或双语；双语文件保留原时间轴，原文在上、译文在下。按钮开启后显示勾选状态，文字保持「双语字幕」。设置支持目标语言、原字幕语言偏好、字体大小、底部距离和自动启用。
 
@@ -43,7 +43,7 @@ API 地址可填以下任一种：
 
 - 配置页参考沉浸式翻译官网的白色顶栏、浅蓝渐变、深蓝标题、粉色强调与胶囊按钮；API 设置、字幕显示、任务库分区展示。字号和底部位置支持即时示例预览，窄屏自动转为纵向布局。
 - 扩展工具栏弹出页与配置页共用配色、字体和品牌标识，提供简短操作指南与「API 与已保存字幕」入口。
-- 借鉴 yt-dlp 的轨道选择与整轨获取逻辑，主动获取一个源轨道的完整字幕；优先复用实际加载的 JSON3 / XML / WebVTT 响应或签名 URL，提供同轨格式备选。
+- 借鉴 yt-dlp 的轨道选择与整轨获取逻辑，主动获取一个源轨道的完整字幕；优先复用实际加载的 JSON3 / XML / WebVTT 响应或签名 URL，提供同轨格式备选。页面请求返回空字幕时，使用 Android 客户端刷新同语言、同种类的完整源轨道地址；不切换到其他语言或机器翻译轨道。
 - 在播放器内部显示原文和译文，跟随播放时间、暂停、倍速和进度跳转；全屏继续显示，广告期间隐藏。
 - 支持人工字幕与 YouTube 自动生成字幕；可选择已有原字幕轨道。
 - 翻译任务由后台持有，切换视频、轨道和设置不会取消旧任务；页面隔离旧结果，任务继续完成并保存。
@@ -57,7 +57,7 @@ API 地址可填以下任一种：
 
 启用翻译才会向所配置的 API 发送完整字幕文本，可能产生费用。默认关闭自动启用。完成的译文保存在当前 Firefox 配置中，个人 API Key 不会写入字幕缓存或导出文件。切换翻译配置会使用对应的缓存；已有结果可以在设置页继续导出。
 
-YouTube 字幕获取使用站点内部接口，可能随站点更新失效。纯扩展不会运行本地 yt-dlp，也不能保证取得受限字幕。无法取得完整时间轴时明确提示重试，不使用零散播放器文本代替全片字幕。接口必须在一次响应中返回完整译文，缺失编号或格式错误不会标记为完成。每次翻译请求最多等待 10 分钟。
+YouTube 字幕获取使用站点内部接口，可能随站点更新失效。纯扩展不会运行本地 yt-dlp，也不能保证取得受限字幕。无法取得完整时间轴时明确提示重试，不使用零散播放器文本代替全片字幕。接口必须在一次响应中返回完整译文，缺失编号或格式错误不会标记为完成。每次翻译请求最多等待 10 分钟；响应体未结束时也会超时并释放任务队列。完整字幕获取最多等待 30 秒。
 
 ## 开发与验证
 
@@ -80,9 +80,9 @@ Firefox 版本使用 Manifest V2 的持久后台脚本，确保长请求在关�
 python -X utf8 scripts/test-firefox.py --live
 ```
 
-`--live` 会在夹具测试后尝试真实公开 YouTube 页面；默认翻译使用模拟 API。结果位于 `output\firefox\report.json`。`--live-only` 的结果位于 `output\firefox-live\live-probe.json`，它会独立记录真实页面字幕是否得到验证。
+`--live` 会在夹具测试后尝试真实公开 YouTube 页面；默认翻译使用模拟 API。结果位于 `output\firefox\report.json`。`--live-only` 的结果位于 `output\firefox-live\live-probe.json`，它会校验完整字幕、保存数量、SRT 导出与单次请求；未验证成功时返回失败。可用 `--video uwS__WiOYTI --report-tag music` 指定视频与独立报告目录。
 
-`scripts/test-api.mjs` 可通过 stdin 接收测试配置，验证真实 Chat Completions；`scripts/test-firefox-real.mjs` 则把隐藏输入的配置传给独立 Firefox，先验证合成视频中的真实整轨翻译，再检查 YouTube。密钥不写入命令参数或报告。
+`scripts/test-api.mjs` 可通过 stdin 接收测试配置，验证真实 Chat Completions；`scripts/test-firefox-real.mjs` 则把隐藏输入的配置传给独立 Firefox，先验证合成视频中的真实整轨翻译，再检查 YouTube；可传入视频 ID，例如 `node scripts/test-firefox-real.mjs uwS__WiOYTI`。密钥不写入命令参数或报告。
 
 ## 文档与参考
 

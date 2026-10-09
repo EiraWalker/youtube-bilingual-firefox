@@ -17,7 +17,9 @@ let extractionContext = null;
 let extractionRequest = null;
 let extractionStartTimer;
 const ownSubtitleUrls = new Set();
-const EXTRACTION_TIMEOUT_MS = 12_000;
+const EXTRACTION_TIMEOUT_MS = 30_000;
+// yt-dlp's Android client obtains fresh caption URLs when WEB requires a subtitle PO token.
+const ANDROID_CLIENT_VERSION = '21.26.364';
 
 function videoId() {
   return new URL(location.href).searchParams.get('v') || '';
@@ -200,6 +202,32 @@ function subtitleCandidates(track) {
   return [...new Set(urls)];
 }
 
+async function alternateSubtitleUrl(track, request, aborted) {
+  const client = { clientName: 'ANDROID', clientVersion: ANDROID_CLIENT_VERSION,
+    androidSdkVersion: 30, osName: 'Android', osVersion: '11', hl: 'en', gl: 'US' };
+  const visitorData = window.ytcfg?.get?.('VISITOR_DATA');
+  if (visitorData) client.visitorData = visitorData;
+  const body = await Promise.race([(async () => {
+    const response = await Reflect.apply(originalFetch, window, ['/youtubei/v1/player?prettyPrint=false', {
+      method: 'POST', credentials: 'include', signal: request.controller.signal,
+      headers: { 'Content-Type': 'application/json', 'X-Youtube-Client-Name': '3',
+        'X-Youtube-Client-Version': ANDROID_CLIENT_VERSION },
+      body: JSON.stringify({ context: { client }, videoId: request.videoId, contentCheckOk: true, racyCheckOk: true }),
+    }]);
+    if (!response.ok) throw new Error('无法刷新完整字幕地址。');
+    const text = await response.text();
+    if (!text.trim() || text.length > 8_000_000) throw new Error('备用字幕轨道响应为空或过大。');
+    return JSON.parse(text);
+  })(), aborted]);
+  if (!extractionIsCurrent(request)) return null;
+  if (body.videoDetails?.videoId !== request.videoId) throw new Error('备用字幕轨道不属于当前视频。');
+  const alternate = body.captions?.playerCaptionsTracklistRenderer?.captionTracks?.find(candidate =>
+    candidate.languageCode === track.language && (candidate.kind === 'asr') === track.automatic);
+  const url = subtitleUrl(alternate?.baseUrl);
+  if (!url || !urlMatchesTrack(url, track)) throw new Error('备用客户端没有所选原字幕轨道。');
+  return url.href; // Preserve the fresh client's signed URL, including its native XML format.
+}
+
 function activateTrack(trackId, sequence, attempts = 16, rearm = false) {
   if (!enabled || sequence !== activationSequence) return;
   const player = document.getElementById('movie_player');
@@ -296,32 +324,40 @@ async function fetchTrack(trackId = desiredTrack) {
   request.promise = (async () => {
     const attempted = new Set();
     let failure = '没有可用的整轨字幕地址。';
+    const readSubtitle = async url => {
+      ownSubtitleUrls.add(url);
+      if (ownSubtitleUrls.size > 32) ownSubtitleUrls.delete(ownSubtitleUrls.values().next().value);
+      const body = await Promise.race([(async () => {
+        const response = await Reflect.apply(originalFetch, window, [url, { credentials: 'include', signal: controller.signal }]);
+        if (!response.ok) throw new Error(`字幕请求返回 HTTP ${response.status}。`);
+        const text = await response.text();
+        if (!text.trim()) throw new Error('YouTube 返回空字幕响应。');
+        if (text.length > 8_000_000) throw new Error('字幕响应过大。');
+        return text;
+      })(), aborted]);
+      if (!extractionIsCurrent(request)) return;
+      receivePayload(url, body, request.generation);
+    };
     try {
       // Re-check captured URLs between attempts: the player may acquire a PO token meanwhile.
       for (let attempt = 0; attempt < 4 && extractionIsCurrent(request); attempt++) {
         const url = subtitleCandidates(track).find(candidate => !attempted.has(candidate));
         if (!url) break;
         attempted.add(url);
-        ownSubtitleUrls.add(url);
-        if (ownSubtitleUrls.size > 32) ownSubtitleUrls.delete(ownSubtitleUrls.values().next().value);
         try {
-          const body = await Promise.race([
-            (async () => {
-              const response = await Reflect.apply(originalFetch, window, [url, { credentials: 'include', signal: controller.signal }]);
-              if (!response.ok) throw new Error(`字幕请求返回 HTTP ${response.status}。`);
-              const text = await response.text();
-              if (!text.trim()) throw new Error('YouTube 返回空字幕响应。');
-              if (text.length > 8_000_000) throw new Error('字幕响应过大。');
-              return text;
-            })(), aborted,
-          ]);
-          if (!extractionIsCurrent(request)) return;
-          receivePayload(url, body, request.generation);
+          await readSubtitle(url);
           return;
         } catch (error) {
           failure = error.message;
           if (controller.signal.aborted) break;
         }
+      }
+      if (extractionIsCurrent(request) && !controller.signal.aborted && !payloadMatchesTrack(lastPayload, track)) {
+        emit('status', { videoId: request.videoId, message: '正在重新获取所选轨道的完整字幕…' });
+        try {
+          const url = await alternateSubtitleUrl(track, request, aborted);
+          if (url && extractionIsCurrent(request)) { await readSubtitle(url); return; }
+        } catch (error) { failure = controller.signal.aborted ? error.message : `${failure} ${error.message}`; }
       }
       if (extractionIsCurrent(request) && !payloadMatchesTrack(lastPayload, track)) {
         emit('status', { videoId: request.videoId, failed: true,

@@ -12,6 +12,7 @@ import datetime
 import http.server
 import json
 import pathlib
+import re
 import shutil
 import socket
 import socketserver
@@ -234,14 +235,21 @@ def save_and_authorize(driver):
 
 
 def main():
+    global OUT
     args = argparse.ArgumentParser()
     args.add_argument('--live', action='store_true', help='Also attempt a public YouTube page through the real network.')
     args.add_argument('--live-only', action='store_true', help='Skip the already verified local player cases.')
     args.add_argument('--video', default='dQw4w9WgXcQ', help='Public YouTube video ID used by the live probe.')
     args.add_argument('--real-api', action='store_true', help='Read private API configuration from stdin; only valid with --live-only.')
+    args.add_argument('--report-tag', default='', help='Separate evidence under output using a letters/digits/hyphens tag.')
     args.add_argument('--firefox', default=r'C:\Program Files\Mozilla Firefox\firefox.exe')
     args.add_argument('--geckodriver', default=str(ROOT / '.tools/geckodriver/geckodriver.exe'))
     options = args.parse_args()
+    if options.report_tag:
+        if not re.fullmatch(r'[\w-]+', options.report_tag):
+            args.error('--report-tag must contain only letters, digits, underscores or hyphens')
+        OUT = OUT / options.report_tag
+        OUT.mkdir(parents=True, exist_ok=True)
     if options.live_only:
         options.live = True
     if options.real_api and not options.live_only:
@@ -537,19 +545,33 @@ def main():
                 report['live']['title'] = driver.js('return document.title')
                 report['live']['controlPresent'] = True
                 report['live']['tracks'] = driver.js("return [...document.querySelector('.ytbl-track').options].map(o=>o.textContent)")
+                # Let page navigation and initial auto-enable settle before toggling.
+                time.sleep(1)
+                driver.wait("document.querySelector('.ytbl-toggle')?.parentElement.classList.contains('ytp-right-controls')", 20)
+                driver.wait("document.querySelector('.ytbl-track')?.options[0]?.value", 20)
                 if driver.js("return document.querySelector('.ytbl-toggle').getAttribute('aria-pressed') !== 'true'"):
                     driver.click('.ytbl-toggle')
-                driver.wait("document.querySelector('.ytbl-toggle').getAttribute('aria-pressed') === 'true'")
+                driver.wait("document.querySelector('.ytbl-toggle').getAttribute('aria-pressed') === 'true'", 3)
                 ad_deadline = time.monotonic() + 65
                 while time.monotonic() < ad_deadline and driver.js("return document.getElementById('movie_player').classList.contains('ad-showing')"):
                     if driver.js("return document.querySelector('#movie_player video')?.paused"):
                         driver.click('.ytp-play-button')
                     time.sleep(.5)
                 if not driver.js("return document.getElementById('movie_player').classList.contains('ad-showing')"):
-                    driver.js("document.querySelector('#movie_player video').currentTime = 20")
-                    deadline = time.monotonic() + 20
-                    while time.monotonic() < deadline and not driver.js("return document.querySelector('.ytbl-translated')?.textContent && document.querySelector('.ytbl-translated').textContent !== '翻译中…'"):
+                    driver.js("const video=document.querySelector('#movie_player video');video.currentTime = 40;video.pause()")
+                    deadline = time.monotonic() + (620 if options.real_api else 60)
+                    next_progress = time.monotonic() + 15
+                    while time.monotonic() < deadline and not driver.js("return document.querySelector('.ytbl-status')?.textContent.includes('已翻译')"):
+                        if driver.js("return document.querySelector('.ytbl-status')?.dataset.error === 'true'"):
+                            break
+                        if time.monotonic() >= next_progress:
+                            print('LIVE PROGRESS:', driver.js("return document.querySelector('.ytbl-status')?.textContent"), flush=True)
+                            next_progress = time.monotonic() + 15
                         time.sleep(.5)
+                    # YouTube can reset a seek during player/ad initialization.
+                    # Sample a fixed cue only after the complete track is ready.
+                    driver.js("const video=document.querySelector('#movie_player video');video.currentTime = 40;video.pause()")
+                    time.sleep(.5)
                 report['live']['status'] = driver.js("return document.querySelector('.ytbl-status')?.textContent")
                 report['live']['originalVisible'] = driver.js("return document.querySelector('.ytbl-original')?.textContent")
                 report['live']['translatedVisible'] = driver.js("return document.querySelector('.ytbl-translated')?.textContent")
@@ -558,6 +580,20 @@ def main():
                 print('LIVE:', json.dumps(report['live'], ensure_ascii=False), flush=True)
                 (OUT / 'live-youtube.png').write_bytes(base64.b64decode(driver.cmd('/screenshot')))
                 driver.click('.ytbl-toggle')
+                if report['live']['subtitleVerified']:
+                    driver.cmd('/url', {'url': options_url})
+                    jobs = extension_message(driver, {'type': 'track:list'})
+                    job = next((j for j in jobs if j['videoId'] == options.video and j['state'] == 'complete'), None)
+                    check('live video saves every translated cue from the complete source track',
+                          job and job['total'] > 0 and job['translatedCount'] == job['total'])
+                    complete = extension_message(driver, {'type': 'track:status', 'id': job['id']})
+                    report['live']['backgroundJob'] = {key: complete[key] for key in ['state', 'videoId', 'total', 'translatedCount']}
+                    report['live']['lastCueEnd'] = complete['cues'][-1]['end']
+                    for mode in ['original', 'translated', 'bilingual']:
+                        exported = extension_message(driver, {'type': 'track:export', 'id': job['id'], 'mode': mode})
+                        check(f'live video {mode} SRT exports all saved cues', len(re.findall(r'(?m)^\d+\r?$', exported['content'])) == job['total'])
+                    if not options.real_api:
+                        check('live complete track uses one translation API request', sum(r['count'] == job['total'] for r in STATE['requests']) == 1)
                 if not report['live']['originalVisible']:
                     if driver.js("return document.querySelector('.ytp-subtitles-button')?.getAttribute('aria-pressed') !== 'true'"):
                         driver.click('.ytp-subtitles-button')
@@ -569,6 +605,8 @@ def main():
                     print('NATIVE BASELINE:', json.dumps(report['live']['nativeBaseline'], ensure_ascii=False), flush=True)
             except (RuntimeError, AssertionError) as error:
                 report['live']['error'] = str(error)[:1500]
+            if options.live_only:
+                check('public YouTube complete-track bilingual subtitles are verified', report['live'].get('subtitleVerified', False) and not report['live'].get('error'))
         report['passed'] = True
     except Exception as error:
         report['passed'] = False

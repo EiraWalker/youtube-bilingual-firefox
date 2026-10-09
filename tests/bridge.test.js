@@ -260,16 +260,85 @@ test('empty JSON3 falls back to a complete VTT format on the same source track',
   assert.equal(captions(fixture)[0].body, vtt);
 });
 
+test('empty web subtitles refresh the selected source track through the Android player client', async () => {
+  const signed = 'https://www.youtube.com/api/timedtext?v=first&lang=en&signature=fresh&c=ANDROID';
+  const xml = '<timedtext><body><p t="0" d="2000">Beginning.</p><p t="600000" d="2000">End.</p></body></timedtext>';
+  const fixture = bridgeFixture({ fetchImpl: async (url, options) => {
+    if (String(url).includes('/youtubei/v1/player')) {
+      const body = JSON.parse(options.body);
+      assert.equal(body.videoId, 'first');
+      assert.equal(body.context.client.clientName, 'ANDROID');
+      assert.equal(options.headers['X-Youtube-Client-Name'], '3');
+      return response(JSON.stringify({ videoDetails: { videoId: 'first' }, captions: {
+        playerCaptionsTracklistRenderer: { captionTracks: [
+          { languageCode: 'ja', baseUrl: signed.replace('lang=en', 'lang=ja') },
+          { languageCode: 'en', kind: 'asr', baseUrl: signed + '&kind=asr' },
+          { languageCode: 'en', baseUrl: signed },
+        ] },
+      } }));
+    }
+    return response(String(url) === signed ? xml : '');
+  } });
+  fixture.send('enable', { trackId: '.en' });
+  fixture.advance(150);
+  await settle();
+  await settle();
+  assert.equal(captions(fixture)[0]?.body, xml);
+  assert.equal(fixture.requests.at(-1).url, signed);
+  assert.equal(fixture.requests.filter(r => r.url.includes('/youtubei/v1/player')).length, 1);
+  assert.equal(captions(fixture)[0]?.automatic, false);
+});
+
 test('all empty formats report complete-track failure without a DOM caption fallback', async () => {
   const fixture = bridgeFixture({ fetchImpl: async () => response('') });
   fixture.send('enable', { trackId: '.en' });
   fixture.advance(150);
   await settle();
-  assert.equal(fixture.requests.length, 3);
+  assert.equal(fixture.requests.length, 4);
   assert.equal(captions(fixture).length, 0);
   const failure = fixture.messages.find(message => message.type === 'status' && message.failed);
   assert.match(failure.message, /无法获取完整字幕.*空字幕响应/);
   assert.doesNotMatch(failure.message, /正在读取播放器字幕/);
+});
+
+test('alternate client cannot substitute another video, language or automatic track', async () => {
+  for (const mismatch of ['video', 'language', 'kind', 'translated', 'host']) {
+    const fixture = bridgeFixture({ fetchImpl: async url => {
+      if (!String(url).includes('/youtubei/v1/player')) return response('');
+      const track = { languageCode: mismatch === 'language' ? 'ja' : 'en',
+        kind: mismatch === 'kind' ? 'asr' : '',
+        baseUrl: `https://${mismatch === 'host' ? 'example.com' : 'www.youtube.com'}/api/timedtext?v=first&lang=en${mismatch === 'translated' ? '&tlang=zh' : ''}` };
+      return response(JSON.stringify({ videoDetails: { videoId: mismatch === 'video' ? 'other' : 'first' },
+        captions: { playerCaptionsTracklistRenderer: { captionTracks: [track] } } }));
+    } });
+    fixture.send('enable', { trackId: '.en' }); fixture.advance(150);
+    await settle(); await settle();
+    assert.equal(captions(fixture).length, 0, mismatch);
+    assert.equal(fixture.requests.length, 4, mismatch);
+    assert.ok(fixture.messages.some(m => m.failed), mismatch);
+  }
+});
+
+test('navigation discards alternate client metadata and a stalled alternate body respects the deadline', async () => {
+  for (const action of ['navigate', 'timeout']) {
+    const pending = deferred();
+    const fixture = bridgeFixture({ fetchImpl: async url => String(url).includes('/youtubei/v1/player')
+      ? { ok: true, text: () => pending.promise } : response('') });
+    fixture.send('enable', { trackId: '.en' }); fixture.advance(150);
+    await settle(); await settle();
+    const alternate = fixture.requests.at(-1);
+    assert.match(alternate.url, /youtubei/);
+    if (action === 'navigate') fixture.navigate(); else fixture.advance(30000);
+    await settle(); await settle();
+    assert.equal(alternate.options.signal.aborted, true);
+    pending.resolve(JSON.stringify({ videoDetails: { videoId: 'first' }, captions: {
+      playerCaptionsTracklistRenderer: { captionTracks: [{ languageCode: 'en', baseUrl: 'https://www.youtube.com/api/timedtext?v=first&lang=en' }] },
+    } }));
+    await settle(); await settle();
+    assert.equal(captions(fixture).length, 0);
+    assert.equal(fixture.requests.length, 4);
+    if (action === 'timeout') assert.match(fixture.messages.find(m => m.failed)?.message, /超时/);
+  }
 });
 
 test('the extraction deadline includes response body reading and aborts the fetch', async () => {
@@ -278,7 +347,7 @@ test('the extraction deadline includes response body reading and aborts the fetc
   fixture.send('enable', { trackId: '.en' });
   fixture.advance(150);
   await settle();
-  fixture.advance(12000);
+  fixture.advance(30000);
   await settle();
   assert.equal(fixture.requests.length, 1);
   assert.equal(fixture.requests[0].options.signal.aborted, true);

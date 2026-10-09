@@ -63,6 +63,12 @@ test('timeout and explicit cancellation release the in-flight request', async ()
   await assert.rejects(pending, /取消/);
 });
 
+test('an already cancelled translation never calls the API', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(translateCues(settings, cues, { signal: controller.signal, fetchImpl: () => assert.fail('must not fetch') }), /取消/);
+});
+
 test('service caches text across IDs, isolates target languages and honors permissions', async () => {
   let calls = 0, current = settings;
   const service = new TranslationService({ loadSettings: async () => current, hasPermission: async () => true, fetchImpl: async (_url, options) => {

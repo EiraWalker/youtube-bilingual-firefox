@@ -50,15 +50,20 @@ export function parseTranslations(content, cues) {
 export async function translateCues(settings, cues, { fetchImpl = fetch, signal, timeoutMs = 600_000 } = {}) {
   validateSettings(settings);
   validateBatch(cues);
+  if (signal?.aborted) throw new Error('翻译已取消。');
   const controller = new AbortController();
+  let rejectAbort;
+  const interrupted = new Promise((_, reject) => { rejectAbort = reject; });
+  const onAbort = () => rejectAbort(new Error('翻译请求已中断。'));
+  controller.signal.addEventListener('abort', onAbort, { once: true });
   const abort = () => controller.abort(signal?.reason);
-  if (signal?.aborted) abort();
   signal?.addEventListener('abort', abort, { once: true });
   const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
   try {
+    if (controller.signal.aborted) throw new Error('翻译请求已中断。');
     const headers = { 'Content-Type': 'application/json' };
     if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
-    const response = await fetchImpl(completionEndpoint(settings.apiBaseUrl), {
+    const response = await Promise.race([fetchImpl(completionEndpoint(settings.apiBaseUrl), {
       method: 'POST',
       headers,
       signal: controller.signal,
@@ -72,19 +77,19 @@ export async function translateCues(settings, cues, { fetchImpl = fetch, signal,
           { role: 'user', content: JSON.stringify({ subtitles: cues.map(({ id, text }) => ({ id, text })) }) },
         ],
       }),
-    });
+    }), interrupted]);
     if (!response.ok) {
       if (response.status === 413) throw new ContextLengthError('字幕请求过长，接口拒绝接收。');
       if ([400, 422].includes(response.status)) {
         let failure;
-        try { failure = await response.json(); } catch { /* Do not expose provider bodies. */ }
+        try { failure = await Promise.race([response.json(), interrupted]); } catch { /* Do not expose provider bodies. */ }
         if (isContextLengthFailure(failure)) throw new ContextLengthError('整轨字幕超过模型上下文长度。');
       }
       const explanations = { 401: 'API Key 无效或缺少认证', 403: '接口拒绝访问', 404: '请检查 API 地址和模型', 429: '接口限流或额度不足' };
       throw new Error(`API 请求失败（HTTP ${response.status}）：${explanations[response.status] || '服务暂时不可用'}。`);
     }
     let data;
-    try { data = await response.json(); } catch { throw new Error('接口响应不是有效 JSON，请检查 API 地址。'); }
+    try { data = await Promise.race([response.json(), interrupted]); } catch { throw new Error('接口响应不是有效 JSON，请检查 API 地址。'); }
     if (data?.choices?.[0]?.finish_reason === 'length') throw new ContextLengthError('模型输出达到长度上限，完整译文未返回。');
     if (isContextLengthFailure(data)) throw new ContextLengthError('整轨字幕超过模型上下文长度。');
     return parseTranslations(data?.choices?.[0]?.message?.content, cues);
@@ -94,6 +99,7 @@ export async function translateCues(settings, cues, { fetchImpl = fetch, signal,
     throw error;
   } finally {
     clearTimeout(timer);
+    controller.signal.removeEventListener('abort', onAbort);
     signal?.removeEventListener('abort', abort);
   }
 }
