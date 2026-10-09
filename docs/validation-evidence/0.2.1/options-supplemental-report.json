@@ -1,0 +1,57 @@
+{
+  "checks": [
+    "keyboard Space toggles auto-enable switch with visible 3px focus",
+    "390px iframe has no document or control horizontal overflow",
+    "390px iframe ResizeObserver fits preview",
+    "320px iframe has no document or control horizontal overflow",
+    "320px iframe ResizeObserver fits preview",
+    "280px iframe has no document or control horizontal overflow",
+    "280px iframe ResizeObserver fits preview",
+    "supplemental native UI session has no extension script errors"
+  ],
+  "viewports": [
+    {
+      "clientWidth": 390,
+      "innerWidth": 390,
+      "overflow": [],
+      "previewScale": 0.496875,
+      "previewWidth": 318,
+      "scrollWidth": 390,
+      "kind": "390px same-origin extension iframe in minimum-500px headless Firefox window"
+    },
+    {
+      "clientWidth": 320,
+      "innerWidth": 320,
+      "overflow": [],
+      "previewScale": 0.3875,
+      "previewWidth": 248,
+      "scrollWidth": 320,
+      "kind": "320px same-origin extension iframe in minimum-500px headless Firefox window"
+    },
+    {
+      "clientWidth": 280,
+      "innerWidth": 280,
+      "overflow": [],
+      "previewScale": 0.325,
+      "previewWidth": 208,
+      "scrollWidth": 280,
+      "kind": "280px same-origin extension iframe in minimum-500px headless Firefox window"
+    }
+  ],
+  "productionVersion": "0.2.1",
+  "mockApiOnly": true,
+  "apiRequestCount": 0,
+  "firefoxVersion": "157.0.1",
+  "checkedSwitchFocus": {
+    "active": true,
+    "background": "rgb(216, 64, 127)",
+    "checked": true,
+    "focusVisible": true,
+    "outlineStyle": "solid",
+    "outlineWidth": "3px",
+    "role": "switch"
+  },
+  "extensionErrors": [],
+  "passed": true,
+  "isolatedProfileRemoved": true
+}
