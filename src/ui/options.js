@@ -6,6 +6,19 @@ const saveButton = document.getElementById('save');
 const testButton = document.getElementById('test');
 const fields = ['apiBaseUrl', 'apiKey', 'model', 'targetLanguage', 'sourceLanguage', 'fontSize', 'bottomOffset', 'autoEnable'];
 
+const previewCanvas = document.getElementById('preview-canvas');
+function updatePreview() {
+  const fontSize = Math.max(14, Math.min(48, Number(document.getElementById('fontSize').value) || 24));
+  const offset = Math.max(20, Math.min(240, Number(document.getElementById('bottomOffset').value) || 70));
+  previewCanvas.style.setProperty('--preview-font', `${fontSize}px`);
+  previewCanvas.style.setProperty('--preview-offset', `${Math.min(offset, 324 - fontSize * 3)}px`);
+}
+for (const id of ['fontSize', 'bottomOffset']) document.getElementById(id).addEventListener('input', updatePreview);
+new ResizeObserver(entries => {
+  previewCanvas.style.setProperty('--preview-scale', entries[0].contentRect.width / 640);
+}).observe(previewCanvas.parentElement);
+updatePreview();
+
 function display(text, error = false) {
   status.textContent = text; status.dataset.error = String(error);
 }
@@ -53,6 +66,7 @@ readSettings(browser.storage.local).then(settings => {
     const input = document.getElementById(id);
     if (input.type === 'checkbox') input.checked = settings[id]; else input.value = settings[id];
   }
+  updatePreview();
 }).catch(error => display(error.message, true));
 
 const libraryList = document.getElementById('library-list');
@@ -82,15 +96,20 @@ async function refreshLibrary() {
     const signature = JSON.stringify(records);
     if (signature === librarySignature) return;
     librarySignature = signature;
+    document.getElementById('library-count').textContent = `${records.length} 项`;
+    document.getElementById('library-empty').hidden = records.length > 0;
     const labels = { queued: '等待翻译', translating: '正在翻译', complete: '已保存', failed: '未完成', cancelled: '已取消' };
     const cards = records.map(record => {
       const card = makeElement('article', '', 'subtitle-record');
       card.dataset.taskId = record.id;
+      card.dataset.state = record.state;
       const title = makeElement('a', record.title || record.videoId);
       title.href = `https://www.youtube.com/watch?v=${encodeURIComponent(record.videoId)}`;
       title.target = '_blank'; title.rel = 'noopener noreferrer';
-      const detail = makeElement('p', `${record.track.language}${record.track.automatic ? '（自动生成）' : ''} → ${record.targetLanguage} · ${record.model} · ${labels[record.state] || record.state}`);
-      card.append(title, detail);
+      const heading = makeElement('div', '', 'record-heading');
+      heading.append(title, makeElement('span', labels[record.state] || record.state, 'record-state'));
+      const detail = makeElement('p', `${record.track.language}${record.track.automatic ? '（自动生成）' : ''} → ${record.targetLanguage} · ${record.model}`);
+      card.append(heading, detail);
       if (record.error) card.append(makeElement('p', record.error, 'record-error'));
       const actions = makeElement('div', '', 'record-actions');
       const mode = makeElement('select'); mode.setAttribute('aria-label', 'SRT 导出内容');
@@ -121,8 +140,6 @@ async function refreshLibrary() {
       card.append(actions); return card;
     });
     libraryList.replaceChildren(...cards);
-    if (!records.length) libraryStatus.textContent = '暂无字幕。启用视频的双语字幕后，任务与保存结果会出现在这里。';
-    else if (libraryStatus.textContent.startsWith('暂无')) libraryStatus.textContent = '';
   } catch (error) { libraryStatus.textContent = error.message; }
   finally { refreshing = false; }
 }

@@ -1,21 +1,98 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YouTube 双语字幕设置</title><link rel="stylesheet" href="ui.css"></head>
-<body><main><div class="eyebrow">FIREFOX · LOCAL</div><h1>YouTube 双语字幕</h1><p class="intro">在播放器内显示原文和译文，使用你指定的 OpenAI 兼容 API。</p>
-<form id="settings-form">
-<fieldset><legend>翻译 API</legend>
-<label>API 地址<input id="apiBaseUrl" type="url" required placeholder="https://api.example.com/v1"><span>可填写服务根地址、/v1 地址或完整 /chat/completions 地址。</span></label>
-<label>API Key<input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="本地免鉴权服务可留空"><span>保存在当前 Firefox 配置中；不会传给 YouTube 页面。</span></label>
-<label>模型名称<input id="model" type="text" required spellcheck="false" placeholder="填写服务商提供的模型 ID"></label>
-<label>目标语言<input id="targetLanguage" type="text" required value="zh-CN" placeholder="zh-CN / English / 日本語"></label>
-</fieldset>
-<fieldset><legend>字幕与显示</legend>
-<label>优先原字幕语言<input id="sourceLanguage" type="text" value="auto" placeholder="auto / en / ja"><span>auto 沿用播放器选择；也可在播放器面板中切换字幕轨道。</span></label>
-<div class="row"><label>字体大小（px）<input id="fontSize" type="number" min="14" max="48" value="24"></label><label>距播放器底部（px）<input id="bottomOffset" type="number" min="20" max="240" value="70"></label></div>
-<label class="check"><input id="autoEnable" type="checkbox">打开 YouTube 视频时自动启用</label>
-<p class="hint">启用后获取完整字幕，通常一次请求翻译整段视频，可能产生 API 费用。翻译期间视频继续播放；关闭视频标签页后任务仍在后台继续。</p>
-</fieldset>
-<div class="actions"><button type="submit" id="save">保存设置</button><button type="button" id="test" class="secondary">测试连接</button></div>
-<p id="status" role="status"></p>
-</form><p class="footnote">播放器中单击「双语字幕」开启；右键该按钮可选择原字幕语言、重新翻译或导出 SRT。没有原字幕的视频暂不支持。</p>
-<section class="subtitle-library" aria-labelledby="library-title"><h2 id="library-title">后台任务与已保存字幕</h2><p class="hint">完整译文保存在当前 Firefox 中。视频标签页关闭后，可在这里查看完成结果、取消任务或导出字幕。Firefox 退出后正在进行的任务会停止。</p><div class="actions"><button type="button" id="refresh-library" class="secondary">刷新列表</button><button type="button" id="clear-library" class="secondary">清除已保存译文</button></div><p id="library-status" role="status"></p><div id="library-list"></div></section>
-</main><script src="options.js"></script></body></html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>YouTube 双语字幕设置</title>
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body class="options">
+  <a class="skip-link" href="#settings-form">跳转到设置</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#top" aria-label="YouTube 双语字幕设置首页">
+        <span class="brand-mark" aria-hidden="true">文<span>A</span></span>
+        <span>双语字幕<span class="brand-divider"> / </span><span class="brand-caption">设置</span></span>
+      </a>
+      <nav aria-label="页面导航"><a href="#translation-settings">翻译服务</a><a href="#subtitle-settings">字幕显示</a><a href="#subtitle-library">字幕库</a></nav>
+      <span class="browser-badge"><span aria-hidden="true"></span>Firefox · Local</span>
+    </div>
+  </header>
+
+  <div class="hero" id="top">
+    <div class="hero-inner">
+      <span class="hero-label">为每一句，保留上下文</span>
+      <h1>YouTube <span>双语字幕</span></h1>
+      <p class="hero-description">原文与译文，一起留在画面里。</p>
+      <div class="feature-list" aria-label="插件功能"><span>整轨翻译</span><i aria-hidden="true"></i><span>后台保存</span><i aria-hidden="true"></i><span>SRT 导出</span></div>
+    </div>
+  </div>
+
+  <main class="options-main">
+    <form id="settings-form">
+      <div class="settings-grid">
+        <section class="settings-card" id="translation-settings" aria-labelledby="api-title">
+          <div class="card-heading"><div><p class="section-kicker">TRANSLATION SERVICE</p><h2 id="api-title">连接你的翻译服务</h2></div><span class="small-badge">OpenAI 兼容</span></div>
+          <p class="section-description">使用你自己的 API，让字幕翻译更自由。</p>
+          <label for="apiBaseUrl">API 地址</label>
+          <input id="apiBaseUrl" type="url" required placeholder="https://api.example.com/v1" aria-describedby="api-url-help">
+          <p class="field-help" id="api-url-help">支持服务根地址、/v1 地址或完整 /chat/completions 地址。</p>
+          <label for="apiKey">API Key</label>
+          <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="本地免鉴权服务可留空" aria-describedby="api-key-help">
+          <p class="field-help" id="api-key-help">仅保存在当前 Firefox 配置中，不会传给 YouTube 页面。</p>
+          <div class="field-row">
+            <div class="field"><label for="model">模型名称</label><input id="model" type="text" required spellcheck="false" placeholder="服务商提供的模型 ID"></div>
+            <div class="field"><label for="targetLanguage">目标语言</label><input id="targetLanguage" type="text" required value="zh-CN" placeholder="zh-CN / English"></div>
+          </div>
+          <div class="service-note"><span class="note-icon" aria-hidden="true">↗</span><div><strong>完整字幕，连贯翻译</strong><p>先获取整条字幕轨道，通常一次请求翻译整段视频。</p></div></div>
+        </section>
+
+        <section class="settings-card appearance-card" id="subtitle-settings" aria-labelledby="appearance-title">
+          <div class="card-heading"><div><p class="section-kicker">SUBTITLE APPEARANCE</p><h2 id="appearance-title">看得清，也读得舒服</h2></div></div>
+          <div class="subtitle-preview" aria-label="字幕效果预览，使用示例文字">
+            <div class="preview-canvas" id="preview-canvas">
+              <span class="preview-label">字幕效果预览</span><div class="preview-play" aria-hidden="true">▶</div>
+              <div class="preview-caption"><span>Hello, world.</span><span>你好，世界。</span></div>
+              <div class="preview-timeline" aria-hidden="true"><span></span></div>
+            </div>
+          </div>
+          <p class="preview-help">调整下方数值，预览字幕大小与位置。</p>
+          <label for="sourceLanguage">优先原字幕语言</label>
+          <input id="sourceLanguage" type="text" value="auto" placeholder="auto / en / ja" aria-describedby="source-help">
+          <p class="field-help" id="source-help">auto 沿用播放器选择，也可在播放器内切换轨道。</p>
+          <div class="field-row appearance-fields">
+            <div class="field"><label for="fontSize">字体大小 <span class="field-unit">px</span></label><input id="fontSize" type="number" min="14" max="48" value="24"></div>
+            <div class="field"><label for="bottomOffset">距底部 <span class="field-unit">px</span></label><input id="bottomOffset" type="number" min="20" max="240" value="70"></div>
+          </div>
+          <label class="toggle-row" for="autoEnable"><span><strong>自动启用双语字幕</strong><span class="toggle-description">打开 YouTube 视频时开始翻译</span></span><input id="autoEnable" type="checkbox" role="switch"></label>
+          <p class="auto-enable-note">自动翻译可能产生 API 费用。</p>
+        </section>
+      </div>
+      <div class="save-panel">
+        <p><span class="save-note-mark" aria-hidden="true">✓</span>设置好之后，回到视频就能开始。</p>
+        <div class="actions"><button type="button" id="test" class="secondary">测试连接<span aria-hidden="true"> ↗</span></button><button type="submit" id="save">保存设置<span aria-hidden="true"> →</span></button></div>
+        <p id="status" role="status" aria-live="polite"></p>
+      </div>
+    </form>
+
+    <section class="subtitle-library" id="subtitle-library" aria-labelledby="library-title">
+      <div class="library-heading">
+        <div><p class="section-kicker">YOUR SUBTITLE LIBRARY</p><h2 id="library-title">后台任务与已保存字幕 <span id="library-count" class="count-badge">0 项</span></h2></div>
+        <div class="actions"><button type="button" id="refresh-library" class="secondary">刷新列表</button><button type="button" id="clear-library" class="text-button">清除已保存译文</button></div>
+      </div>
+      <p class="library-description">关掉视频标签页，翻译仍会继续。完成后，随时回来导出字幕。</p>
+      <p id="library-status" role="status" aria-live="polite"></p>
+      <div id="library-empty" class="library-empty" hidden>
+        <span class="empty-icon" aria-hidden="true">文<span>A</span></span>
+        <div><h3>你的字幕库，从第一段视频开始</h3><p>在播放器中启用「双语字幕」，任务与保存结果就会出现在这里。</p></div>
+        <span class="empty-format" aria-hidden="true">.SRT</span>
+      </div>
+      <div id="library-list"></div>
+      <p class="library-footnote">译文保存在当前 Firefox 中；退出浏览器会停止尚未完成的任务。</p>
+    </section>
+    <footer class="page-footer"><span>YouTube 双语字幕 · Local</span><p>单击播放器中的「双语字幕」开启，右键可选择语言、重新翻译或导出 SRT。暂不支持没有原字幕的视频。</p></footer>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

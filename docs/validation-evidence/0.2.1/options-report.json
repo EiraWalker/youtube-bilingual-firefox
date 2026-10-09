@@ -1,0 +1,132 @@
+{
+  "checks": [
+    "production bundle installs in isolated native Firefox",
+    "configuration loads on native extension origin",
+    "narrow iframe capture uses actual 390 CSS pixel document viewport",
+    "subtitle font and offset inputs update live preview",
+    "ResizeObserver scales preview within native Firefox card",
+    "all configuration fields persist across page refresh",
+    "saved preview font and offset restore on page refresh",
+    "connection button reaches local mock through production background fetch",
+    "repeated connection click remains a fresh API request",
+    "connection failure is visible and buttons recover",
+    "connection feedback recovers from failure",
+    "task list shows saved whole-track result after navigating back",
+    "manual library refresh preserves completed result",
+    "SRT selector retains original translated and bilingual modes",
+    "unchanged library refresh preserves selected export mode",
+    "export button downloads selected translated SRT through native API",
+    "ongoing library task has visible cancel button",
+    "cancel button stops the actual background task",
+    "clear saved translations retains cancelled task and clears completed record",
+    "1280px CSS viewport has no page or interactive control horizontal overflow",
+    "390px CSS viewport has no page or interactive control horizontal overflow",
+    "keyboard Tab reaches controls with visible focus indication",
+    "native extension configuration has no uncaught script errors"
+  ],
+  "mockApiOnly": true,
+  "nativeSaveDialogSuppressedForTest": true,
+  "viewports": [
+    {
+      "clientWidth": 1280,
+      "innerHeight": 875,
+      "innerWidth": 1280,
+      "overflow": [],
+      "scrollWidth": 1280,
+      "kind": "native window"
+    },
+    {
+      "clientWidth": 390,
+      "innerHeight": 759,
+      "innerWidth": 390,
+      "overflow": [],
+      "scrollWidth": 390,
+      "kind": "390px iframe in minimum-500px headless Firefox window"
+    }
+  ],
+  "firefoxVersion": "157.0.1",
+  "optionsUrlScheme": "moz-extension",
+  "download": {
+    "mode": "translated",
+    "filename": "YouTube player fixture_fixture0010_zh-CN_translated.srt",
+    "state": "complete"
+  },
+  "keyboardFocus": [
+    {
+      "boxShadow": "rgba(234, 76, 137, 0.004) 0px 0px 0px 0.15059px",
+      "documentFocused": true,
+      "id": "apiKey",
+      "outlineStyle": "solid",
+      "outlineWidth": "3px",
+      "tag": "INPUT",
+      "visible": true
+    },
+    {
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+      "documentFocused": true,
+      "id": "model",
+      "outlineStyle": "solid",
+      "outlineWidth": "3px",
+      "tag": "INPUT",
+      "visible": true
+    },
+    {
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+      "documentFocused": true,
+      "id": "targetLanguage",
+      "outlineStyle": "solid",
+      "outlineWidth": "3px",
+      "tag": "INPUT",
+      "visible": true
+    },
+    {
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+      "documentFocused": true,
+      "id": "sourceLanguage",
+      "outlineStyle": "solid",
+      "outlineWidth": "3px",
+      "tag": "INPUT",
+      "visible": true
+    },
+    {
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+      "documentFocused": true,
+      "id": "fontSize",
+      "outlineStyle": "solid",
+      "outlineWidth": "3px",
+      "tag": "INPUT",
+      "visible": true
+    },
+    {
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+      "documentFocused": true,
+      "id": "bottomOffset",
+      "outlineStyle": "solid",
+      "outlineWidth": "3px",
+      "tag": "INPUT",
+      "visible": true
+    },
+    {
+      "boxShadow": "rgba(234, 76, 137, 0.07) 0px 0px 0px 3px",
+      "documentFocused": true,
+      "id": "autoEnable",
+      "outlineStyle": "solid",
+      "outlineWidth": "3px",
+      "tag": "INPUT",
+      "visible": true
+    },
+    {
+      "boxShadow": "none",
+      "documentFocused": true,
+      "id": "test",
+      "outlineStyle": "solid",
+      "outlineWidth": "3px",
+      "tag": "BUTTON",
+      "visible": true
+    }
+  ],
+  "extensionErrors": [],
+  "passed": true,
+  "apiRequestCount": 6,
+  "isolatedProfileRemoved": true
+}
