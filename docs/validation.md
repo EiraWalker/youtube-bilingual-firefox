@@ -10,9 +10,9 @@
 | --- | --- | --- |
 | 字幕解析、时间窗口、翻译协议、缓存、取消、原生字幕恢复 | 19 / 19 通过 | `npm test` |
 | Mozilla 扩展校验 | 0 错误、0 提示、0 警告 | `npm run package` 中的 `web-ext lint` |
-| 原生 Firefox：生产包安装、设置、权限、播放器交互和错误恢复 | 24 / 24 通过 | [Firefox 报告](../output/firefox/report.json) |
-| 用户指定 API 的真实 Chat Completions | 通过 | [真实 API 报告](../output/real-api.json) |
-| 用户指定 API → 扩展后台 → Firefox 播放器内双语显示 | 通过，使用本地合成视频与字幕 | [真实 API 播放器报告](../output/firefox-live/live-probe.json)、[截图](../output/firefox-live/real-api-player.png) |
+| 原生 Firefox：生产包安装、设置、权限、播放器交互和错误恢复 | 24 / 24 通过 | 当时的本地 `output/firefox/report.json` |
+| 用户指定 API 的真实 Chat Completions | 通过 | 当时的本地 `output/real-api.json` |
+| 用户指定 API → 扩展后台 → Firefox 播放器内双语显示 | 通过，使用本地合成视频与字幕 | 当时的本地 `output/firefox-live/live-probe.json` 与截图 |
 | 真实 YouTube 视频完整字幕链路 | 尚未通过 | 同一报告中的 `live.subtitleVerified: false` |
 
 真实 API 使用 `http://127.0.0.1:8045/v1/chat/completions` 和模型 `gemini-3.8-flash-high`。Firefox 测试通过扩展设置页保存配置、授予权限，再由生产扩展请求接口；播放器内显示原文 `Hello world.` 与真实译文 `你好，世界。`。密钥未写入项目文件、命令参数、报告或安装包。
@@ -31,7 +31,7 @@
 
 ## 交付物
 
-- [Firefox 安装包](../dist/youtube-bilingual-firefox-0.1.0.zip)，20,262 字节。
+- 历史 Firefox 安装包 `dist/youtube-bilingual-firefox-0.1.0.zip`，20,262 字节，仅在原本地工作区保留。
 - SHA256：`e4ae4df37e176b0b776e75ecd8d3a19dfc8909f8d94abad4e0e65eefc40fa31f`。
 - 安装包与原生 Firefox 测试安装的文件逐项一致。
 - 当前交付为未签名临时扩展；Firefox 重启后需要重新加载，永久安装需后续 Mozilla 签名。
