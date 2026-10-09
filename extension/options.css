@@ -1,14 +1,3 @@
-:root {
-  color-scheme: light;
-  --accent: #ea4c89;
-  --accent-text: #b52c60;
-  --ink: #172b3a;
-  --muted: #626873;
-  --border: #e5eaf0;
-  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
-  color: var(--ink);
-  background: #fff;
-}
 html { scroll-behavior: smooth; scroll-padding-top: 92px; }
 body.options { min-width: 280px; font-size: 14px; line-height: 1.5; }
 .options [hidden] { display: none !important; }
@@ -19,8 +8,6 @@ body.options { min-width: 280px; font-size: 14px; line-height: 1.5; }
 .site-header { position: sticky; top: 0; z-index: 10; background: #ffffffed; border-bottom: 1px solid #edf0f3; backdrop-filter: blur(16px); }
 .header-inner { max-width: 1160px; min-height: 72px; margin: auto; padding: 12px 28px; display: flex; align-items: center; gap: 36px; }
 .brand { display: flex; align-items: center; gap: 10px; color: #242b36; font-size: 17px; font-weight: 650; white-space: nowrap; }
-.brand-mark { display: flex; align-items: baseline; justify-content: center; gap: 1px; width: 34px; height: 34px; padding-top: 6px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 16px; box-shadow: 0 3px 9px #ea4c891f; }
-.brand-mark span { font-size: 12px; }
 .brand-divider { margin: 0 5px; color: #d0d5db; font-weight: 400; }
 .brand-caption { font-size: 14px; font-weight: 400; color: var(--muted); }
 .header-inner nav { display: flex; align-items: center; gap: 24px; }

@@ -1,0 +1,13 @@
+:root {
+  color-scheme: light;
+  --accent: #ea4c89;
+  --accent-text: #b52c60;
+  --ink: #172b3a;
+  --muted: #626873;
+  --border: #e5eaf0;
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+  color: var(--ink);
+  background: #fff;
+}
+.brand-mark { display: flex; align-items: baseline; justify-content: center; gap: 1px; width: 34px; height: 34px; padding-top: 6px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 16px; box-shadow: 0 3px 9px #ea4c891f; }
+.brand-mark span { font-size: 12px; }

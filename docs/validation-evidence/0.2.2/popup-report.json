@@ -1,0 +1,43 @@
+{
+  "version": "0.2.2",
+  "checks": [
+    "production 0.2.2 package installs in isolated Firefox",
+    "344px popup has no horizontal overflow or blank status space",
+    "popup uses shared pink accent and black capsule action",
+    "keyboard Tab exposes a visible 3px focus outline",
+    "settings-open failure is readable and within popup width",
+    "settings button opens the real extension options page",
+    "shared theme keeps options palette and layout intact",
+    "shared theme preserves checked-switch keyboard focus",
+    "popup and options have no uncaught extension script errors"
+  ],
+  "apiRequests": 0,
+  "popupTestMode": "native moz-extension popup.html opened in a browser tab",
+  "firefoxVersion": "157.0.1",
+  "appearance": {
+    "buttonBackground": "rgb(23, 29, 38)",
+    "buttonRadius": "24px",
+    "height": 377,
+    "scrollWidth": 344,
+    "statusHidden": true,
+    "steps": 2,
+    "theme": "#ea4c89",
+    "width": 344
+  },
+  "keyboardFocus": {
+    "active": true,
+    "outlineStyle": "solid",
+    "outlineWidth": "3px",
+    "visible": true
+  },
+  "optionsTheme": {
+    "accent": "#ea4c89",
+    "font": "\"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", system-ui, sans-serif",
+    "mark": "rgb(234, 76, 137)",
+    "overflow": false,
+    "scheme": "light"
+  },
+  "extensionErrors": [],
+  "passed": true,
+  "isolatedProfileRemoved": true
+}

@@ -1,0 +1,24 @@
+* { box-sizing: border-box; }
+body { width: 344px; margin: 0; font-size: 13px; line-height: 1.6; }
+main { padding-bottom: 16px; }
+.popup-header { display: flex; align-items: center; gap: 12px; padding: 23px 22px 25px; background: radial-gradient(ellipse at 40% 0%, #c6e7f6, #e2f5fe 65%, #fff 100%); }
+.brand-mark { flex: 0 0 34px; }
+.eyebrow { margin: 0 0 3px; color: #4c7289; font-size: 9px; font-weight: 550; letter-spacing: 1.6px; }
+h1 { margin: 0; color: #0b354d; font-size: 20px; font-weight: 650; letter-spacing: -.4px; line-height: 1.5; }
+h1 span { color: var(--accent); }
+.quick-guide { margin: 0 18px; padding: 17px 16px; border: 1px solid var(--border); border-radius: 18px; background: #fff; box-shadow: 0 5px 18px #193c5408; }
+ol { display: grid; gap: 17px; margin: 0; padding: 0; list-style: none; }
+li { display: flex; align-items: flex-start; gap: 12px; }
+.step-number { display: grid; place-items: center; flex: 0 0 27px; width: 27px; height: 27px; border: 1px solid #e2edf5; border-radius: 9px; background: #f2f8fc; color: #60839c; font-size: 10px; font-weight: 550; }
+h2 { margin: 0; color: #29475c; font-size: 12px; font-weight: 600; line-height: 1.7; }
+.quick-guide p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.popup-actions { margin: 17px 18px 0; }
+button { display: flex; align-items: center; justify-content: center; gap: 18px; width: 100%; min-height: 42px; padding: 10px 18px; border: 1px solid #171d26; border-radius: 24px; background: #171d26; color: #fff; font-family: inherit; font-size: 12px; font-weight: 550; line-height: 1.5; cursor: pointer; transition: background .15s, box-shadow .15s; }
+button > span { font-size: 16px; font-weight: 400; }
+button:hover { background: #293645; box-shadow: 0 0 0 3px #c4e6f642; }
+button:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; }
+#status { margin: 12px 0 0; padding: 9px 11px; border: 1px solid #f2d7df; border-radius: 12px; background: #fff5f7; color: #a6364e; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+#status:empty { display: none; }
+footer { margin: 12px 18px 0; color: #63788a; text-align: center; font-size: 10px; letter-spacing: .3px; }
+footer span { margin: 0 5px; color: #9aaebd; }
+@media (prefers-reduced-motion: reduce) { button { transition: none; } }

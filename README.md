@@ -1,6 +1,6 @@
 # YouTube 双语字幕 · Local
 
-Firefox 0.2.1 扩展：取得一个原字幕语言轨道的完整字幕，通常用一次 OpenAI 兼容 Chat Completions 请求翻译整片，在 YouTube 播放器内显示双语字幕，保存译文并导出 SRT。默认目标语言为简体中文，可修改。
+Firefox 0.2.2 扩展：取得一个原字幕语言轨道的完整字幕，通常用一次 OpenAI 兼容 Chat Completions 请求翻译整片，在 YouTube 播放器内显示双语字幕，保存译文并导出 SRT。默认目标语言为简体中文，可修改。
 
 项目目录：`E:\plugin\immersive-translate-local`。
 
@@ -11,14 +11,14 @@ GitHub 私有仓库：[EiraWalker/youtube-bilingual-firefox](https://github.com/
 需要 Firefox 142 或更新版本。开发版采用临时加载方式：
 
 1. 打开 Firefox，进入 `about:debugging#/runtime/this-firefox`。
-2. 点击「临时载入附加组件」，选择 `E:\plugin\immersive-translate-local\build\firefox\manifest.json`，或选择 `dist\youtube-bilingual-firefox-0.2.1.zip`。
+2. 点击「临时载入附加组件」，选择 `E:\plugin\immersive-translate-local\build\firefox\manifest.json`，或选择 `dist\youtube-bilingual-firefox-0.2.2.zip`。
 3. 点击扩展图标 →「API 与已保存字幕」。填写 API 地址、模型名称和 API Key，保存时授予该 API 网站的访问权限。本地免鉴权服务的 Key 可留空。
 4. 点击「测试连接」，确认能返回译文。
 5. 打开或刷新 YouTube 视频页面，单击播放器里的「双语字幕」按钮。
 
 本次测试地址为 `http://127.0.0.1:8045/v1`，模型为 `gemini-3.8-flash-high`。Key 请在设置页填写，项目文件中不包含个人 Key。
 
-字幕功能的测试结果与实际网站验证边界见 [0.2.0 验证记录](docs/validation-0.2.md)，新版配置页的样式与交互验证见 [0.2.1 配置页改版](docs/options-style-0.2.1.md)。
+字幕功能的测试结果与实际网站验证边界见 [0.2.0 验证记录](docs/validation-0.2.md)，配置页的样式与交互验证见 [0.2.1 配置页改版](docs/options-style-0.2.1.md)，工具栏弹出页见 [0.2.2 弹出页改版](docs/popup-style-0.2.2.md)。
 
 右键「双语字幕」按钮可选择原字幕语言、重试、重新翻译、取消翻译或导出 SRT。导出内容可选原文、译文或双语；双语文件保留原时间轴，原文在上、译文在下。按钮开启后显示勾选状态，文字保持「双语字幕」。设置支持目标语言、原字幕语言偏好、字体大小、底部距离和自动启用。
 
@@ -42,6 +42,7 @@ API 地址可填以下任一种：
 ## 已实现
 
 - 配置页参考沉浸式翻译官网的白色顶栏、浅蓝渐变、深蓝标题、粉色强调与胶囊按钮；API 设置、字幕显示、任务库分区展示。字号和底部位置支持即时示例预览，窄屏自动转为纵向布局。
+- 扩展工具栏弹出页与配置页共用配色、字体和品牌标识，提供简短操作指南与「API 与已保存字幕」入口。
 - 借鉴 yt-dlp 的轨道选择与整轨获取逻辑，主动获取一个源轨道的完整字幕；优先复用实际加载的 JSON3 / XML / WebVTT 响应或签名 URL，提供同轨格式备选。
 - 在播放器内部显示原文和译文，跟随播放时间、暂停、倍速和进度跳转；全屏继续显示，广告期间隐藏。
 - 支持人工字幕与 YouTube 自动生成字幕；可选择已有原字幕轨道。

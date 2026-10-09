@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "YouTube 双语字幕 · Local",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "在 YouTube 播放器内显示原文与 OpenAI 兼容 API 翻译的字幕。",
   "browser_specific_settings": {
     "gecko": {
