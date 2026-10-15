@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import { activeCue, chooseTrack, parseCaptionPayload } from '../src/shared/captions.js';
 
 const source = readFileSync(new URL('../src/content/main.js', import.meta.url), 'utf8')
@@ -18,6 +19,7 @@ function node() {
       toggle(name, value) { if (value) classes.add(name); else classes.delete(name); },
     },
     addEventListener(name, handler) { if (!handlers.has(name)) handlers.set(name, new Set()); handlers.get(name).add(handler); },
+    setAttribute() {},
     removeEventListener(name, handler) { handlers.get(name)?.delete(handler); },
     emit(name) { for (const handler of handlers.get(name) || []) handler(); },
   };
@@ -26,10 +28,10 @@ function fixture(respond = async () => null) {
   const calls = [], logs = [], posted = [];
   let now = 0;
   const elements = Object.fromEntries(['player', 'video', 'overlay', 'originalLine', 'translatedLine', 'progress', 'status', 'panel',
-    'exportButton', 'exportMode', 'cancelButton', 'retryButton'].map(key => [key, node()]));
+    'exportButton', 'exportMode', 'cancelButton', 'retryButton', 'cacheButton'].map(key => [key, node()]));
   elements.panel.hidden = true;
   const context = vm.createContext({
-    activeCue, chooseTrack, parseCaptionPayload, URL, performance: { now: () => now },
+    activeCue, chooseTrack, parseCaptionPayload, URL, crypto: webcrypto, performance: { now: () => now },
     console: { error: (...args) => logs.push(args) },
     document: { hidden: false, addEventListener() {}, querySelector: () => null, title: 'Fixture video' },
     location: { origin: 'https://www.youtube.com', href: 'https://www.youtube.com/watch?v=fixture0001' },
@@ -39,8 +41,8 @@ function fixture(respond = async () => null) {
     setTimeout, clearTimeout, setInterval: () => 0, elements,
   });
   vm.runInContext(source, context);
-  vm.runInContext(`({player,video,overlay,originalLine,translatedLine,progress,status,panel,exportButton,exportMode,cancelButton,retryButton} = elements);
-    enabled=true;currentVideo='fixture0001';settings={ready:true};
+  vm.runInContext(`({player,video,overlay,originalLine,translatedLine,progress,status,panel,exportButton,exportMode,cancelButton,retryButton,cacheButton} = elements);
+    enabled=true;sourceVerified=true;currentVideo='fixture0001';settings={ready:true,cacheConfigured:true};
     tracks=[{id:'.en',language:'en',automatic:false}];trackId='.en';`, context);
   return { ...elements, calls, logs, posted, context,
     time(value) { now = value; },
@@ -82,19 +84,20 @@ test('older revisions and responses for another video cannot replace the visible
   assert.equal(f.translatedLine.textContent, '首条译文');
 });
 
-test('playback ticks are throttled, explicit seeks are immediate, ads suppress reports and rebinding removes listeners', async () => {
+test('playback ticks are throttled; seeks, pause and ads update viewing eligibility; rebinding removes listeners', async () => {
   const f = fixture(); f.apply(task());
   f.context.bindPlayback();
   f.video.emit('timeupdate'); f.time(500); f.video.emit('timeupdate');
   f.video.emit('seeked');
   assert.deepEqual(f.calls.map(call => call.reason), ['tick', 'seek']);
   f.player.classList.add('ad-showing'); f.video.emit('ratechange');
-  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls.at(-1).active, false);
+  assert.equal(f.calls.length, 3);
   f.player.classList.remove('ad-showing');
   const replacement = node();
   f.context.replacement = replacement;
   f.run('video=replacement;bindPlayback()');
-  f.video.emit('play'); assert.equal(f.calls.length, 2);
+  f.video.emit('play'); assert.equal(f.calls.length, 3);
   replacement.playbackRate = 2; replacement.emit('ratechange');
   assert.equal(f.calls.at(-1).rate, 2);
   assert.equal(f.calls.at(-1).id, 'task-a');
@@ -140,4 +143,30 @@ test('start includes current playback and an outdated poll cannot apply after vi
   await pending;
   assert.equal(f.run('task'), null);
   assert.equal(f.translatedLine.textContent, '');
+});
+
+test('manual caching uses a snapshot only and prevents duplicate clicks without resuming playback', async () => {
+  let release;
+  const f = fixture(async message => message.type === 'track:cache' ? new Promise(resolve => { release = resolve; }) : null);
+  f.apply(task({ state: 'paused' })); f.video.paused = true;
+  const pending = f.context.cacheSubtitles();
+  await f.context.cacheSubtitles();
+  assert.equal(f.calls.filter(c => c.type === 'track:cache').length, 1);
+  assert.equal(f.cacheButton.disabled, true);
+  release({ path: 'fixture-cache', translatedCount: 1, total: 2, complete: false });
+  await pending;
+  assert.match(f.status.textContent, /部分缓存.*1 \/ 2/);
+  assert.equal(f.cacheButton.disabled, false); assert.equal(f.video.paused, true);
+  assert.equal(f.calls.some(c => ['track:resume', 'track:start'].includes(c.type)), false);
+});
+
+test('unconfigured cache opens settings, and pause/disable reports revoke watching eligibility', async () => {
+  const f = fixture(); f.apply(task());
+  f.run('settings.cacheConfigured=false');
+  await f.context.cacheSubtitles();
+  assert.equal(f.calls[0].type, 'settings:open');
+  f.context.bindPlayback(); f.video.paused = true; f.video.emit('pause');
+  assert.equal(f.calls.at(-1).active, false);
+  f.video.paused = false; f.context.setEnabled(false);
+  assert.equal(f.calls.at(-1).active, false);
 });

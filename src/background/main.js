@@ -1,13 +1,16 @@
 import { apiOriginPattern, publicSettings, readSettings } from '../shared/settings.js';
 import { TranslationService, translateCues } from './translator.js';
 import { TrackTaskService } from './track-tasks.js';
+import { SubtitleCache } from './subtitle-cache.js';
 
 const loadSettings = () => readSettings(browser.storage.local);
 const service = new TranslationService({
   loadSettings,
   hasPermission: (settings) => browser.permissions.contains({ origins: [apiOriginPattern(settings)] }),
 });
+const cache = new SubtitleCache();
 const tasks = new TrackTaskService({
+  cache,
   storage: browser.storage.local,
   loadSettings,
   hasPermission: (settings) => browser.permissions.contains({ origins: [apiOriginPattern(settings)] }),
@@ -25,6 +28,7 @@ browser.downloads?.onChanged.addListener((change) => {
   if (['complete', 'interrupted'].includes(change.state?.current)) releaseDownload(change.id);
 });
 browser.tabs?.onRemoved.addListener(tabId => tasks.detach(tabId));
+browser.tabs?.onUpdated.addListener((tabId, change) => { if (change.status === 'loading' || change.url) tasks.detach(tabId); });
 
 async function downloadSrt(message) {
   const { filename, content } = await tasks.export(message.id, message.mode);
@@ -63,6 +67,15 @@ browser.runtime.onMessage.addListener((message, sender) => {
       case 'track:position':
         if (!trustedPage(sender)) throw new Error('播放位置请求来源不正确。');
         return tasks.position(message, sender.tab.id);
+      case 'track:cache':
+        if (!trustedPage(sender) && !fromOptions) throw new Error('缓存请求来源不正确。');
+        return tasks.snapshot(message.id);
+      case 'cache:validate':
+        if (!fromOptions) throw new Error('请从设置页配置缓存目录。');
+        return cache.validate(message.folder);
+      case 'cache:open':
+        if (!fromOptions) throw new Error('请从设置页定位缓存目录。');
+        return cache.open((await loadSettings()).cacheFolder);
       case 'track:resume':
         if (!trustedPage(sender) && !fromOptions) throw new Error('恢复请求来源不正确。');
         return tasks.resume(message.id);

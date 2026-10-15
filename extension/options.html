@@ -26,7 +26,7 @@
       <span class="hero-label">为每一句，保留上下文</span>
       <h1>YouTube <span>双语字幕</span></h1>
       <p class="hero-description">原文与译文，一起留在画面里。</p>
-      <div class="feature-list" aria-label="插件功能"><span>整轨翻译</span><i aria-hidden="true"></i><span>后台保存</span><i aria-hidden="true"></i><span>SRT 导出</span></div>
+      <div class="feature-list" aria-label="插件功能"><span>按需翻译</span><i aria-hidden="true"></i><span>手动缓存</span><i aria-hidden="true"></i><span>SRT 导出</span></div>
     </div>
   </div>
 
@@ -46,7 +46,7 @@
             <div class="field"><label for="model">模型名称</label><input id="model" type="text" required spellcheck="false" placeholder="服务商提供的模型 ID"></div>
             <div class="field"><label for="targetLanguage">目标语言</label><input id="targetLanguage" type="text" required value="zh-CN" placeholder="zh-CN / English"></div>
           </div>
-          <div class="service-note"><span class="note-icon" aria-hidden="true">↗</span><div><strong>完整字幕，连贯翻译</strong><p>先获取整条字幕轨道，通常一次请求翻译整段视频。</p></div></div>
+          <div class="service-note"><span class="note-icon" aria-hidden="true">↗</span><div><strong>随播放位置准备译文</strong><p>预取前方最多 120 秒；暂停或离开后停止新增请求。</p></div></div>
         </section>
 
         <section class="settings-card appearance-card" id="subtitle-settings" aria-labelledby="appearance-title">
@@ -70,6 +70,13 @@
           <p class="auto-enable-note">自动翻译可能产生 API 费用。</p>
         </section>
       </div>
+      <section class="settings-card" aria-labelledby="cache-title">
+        <h2 id="cache-title">字幕缓存</h2>
+        <label for="cacheFolder">缓存文件夹路径</label>
+        <input id="cacheFolder" type="text" spellcheck="false" placeholder="选择本机绝对路径" aria-describedby="cache-help">
+        <p id="cache-help" class="field-help">点击播放器中的“缓存字幕”保存当前结果。自定义目录需要安装随附的 Windows 缓存组件。</p>
+        <button id="open-cache-folder" type="button" class="secondary">打开缓存文件夹</button>
+      </section>
       <div class="save-panel">
         <p><span class="save-note-mark" aria-hidden="true">✓</span>设置好之后，回到视频就能开始。</p>
         <div class="actions"><button type="button" id="test" class="secondary">测试连接<span aria-hidden="true"> ↗</span></button><button type="submit" id="save">保存设置<span aria-hidden="true"> →</span></button></div>
@@ -79,18 +86,18 @@
 
     <section class="subtitle-library" id="subtitle-library" aria-labelledby="library-title">
       <div class="library-heading">
-        <div><p class="section-kicker">YOUR SUBTITLE LIBRARY</p><h2 id="library-title">后台任务与已保存字幕 <span id="library-count" class="count-badge">0 项</span></h2></div>
-        <div class="actions"><button type="button" id="refresh-library" class="secondary">刷新列表</button><button type="button" id="clear-library" class="text-button">清除已保存译文</button></div>
+        <div><p class="section-kicker">YOUR SUBTITLE LIBRARY</p><h2 id="library-title">本次会话与旧版缓存 <span id="library-count" class="count-badge">0 项</span></h2></div>
+        <div class="actions"><button type="button" id="refresh-library" class="secondary">刷新列表</button><button type="button" id="clear-library" class="text-button">清除旧版完整缓存</button></div>
       </div>
-      <p class="library-description">关掉视频标签页，翻译仍会继续。完成后，随时回来导出字幕。</p>
+      <p class="library-description">本次会话的临时译文与旧版缓存。</p>
       <p id="library-status" role="status" aria-live="polite"></p>
       <div id="library-empty" class="library-empty" hidden>
         <span class="empty-icon" aria-hidden="true">文<span>A</span></span>
-        <div><h3>你的字幕库，从第一段视频开始</h3><p>在播放器中启用「双语字幕」，任务与保存结果就会出现在这里。</p></div>
+        <div><h3>暂无字幕</h3><p>在播放器中启用「双语字幕」。</p></div>
         <span class="empty-format" aria-hidden="true">.SRT</span>
       </div>
       <div id="library-list"></div>
-      <p class="library-footnote">译文保存在当前 Firefox 中；退出浏览器会停止尚未完成的任务。</p>
+      <p class="library-footnote">未点击“缓存字幕”的译文只在当前浏览器会话保留。</p>
     </section>
     <footer class="page-footer"><span>YouTube 双语字幕 · Local</span><p>单击播放器中的「双语字幕」开启，右键可选择语言、重新翻译或导出 SRT。暂不支持没有原字幕的视频。</p></footer>
   </main>

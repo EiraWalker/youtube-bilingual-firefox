@@ -359,7 +359,7 @@ def main():
     profile = pathlib.Path(tempfile.mkdtemp(prefix='isolated-profile-', dir=OUT))
     download_dir = pathlib.Path(tempfile.mkdtemp(prefix='downloads-', dir=OUT))
     capabilities = {'browserName': 'firefox', 'acceptInsecureCerts': True,
-        'moz:firefoxOptions': {'binary': options.firefox, 'args': ['-headless', '-profile', str(profile)], 'prefs': {
+        'moz:firefoxOptions': {'binary': options.firefox, 'args': ['-headless', '-no-remote', '-new-instance', '-profile', str(profile)], 'prefs': {
             'network.proxy.type': 1, 'network.proxy.ssl': '127.0.0.1', 'network.proxy.ssl_port': proxy.server_address[1],
             'network.proxy.http': '127.0.0.1', 'network.proxy.http_port': proxy.server_address[1], 'network.proxy.no_proxies_on': 'localhost,127.0.0.1',
             'network.http.http3.enable': False, 'browser.download.folderList': 2,
@@ -402,7 +402,7 @@ def main():
                 driver.wait("document.getElementById('status').textContent.includes('连接成功')")
             check('each repeated test-connection click makes a new API request', len(STATE['requests']) == test_before + 2)
         if not options.live_only:
-            from firefox_buffered_cases import run_fixture_cases
+            from firefox_demand_cases import run_fixture_cases
             options_url, buffered_report = run_fixture_cases(
                 driver, options_url, STATE, check, extension_message, wait_job,
                 capabilities, addon, extension_url, OUT, len(FIXTURE_CUES))
@@ -470,10 +470,10 @@ def main():
                     driver.cmd('/url', {'url': options_url})
                     jobs = extension_message(driver, {'type': 'track:list'})
                     job = next((j for j in jobs if j['videoId'] == options.video), None)
-                    check('live video exposes a saved partial or complete background task', job and job['translatedCount'] > 0)
+                    check('live video exposes temporary partial or complete translated rows', job and job['translatedCount'] > 0)
                     if options.first_only:
                         partial = extension_message(driver, {'type': 'track:status', 'id': job['id']})
-                        check('first-only probe verifies durable translations before cancellation', len(partial.get('translations', [])) == partial['translatedCount'] and 0 < partial['translatedCount'] <= partial['total'])
+                        check('first-only probe verifies temporary translations before cancellation', len(partial.get('translations', [])) == partial['translatedCount'] and 0 < partial['translatedCount'] <= partial['total'])
                         report['live']['backgroundJob'] = {key: partial[key] for key in ['state', 'videoId', 'total', 'translatedCount']}
                         report['live']['metrics'] = partial.get('metrics', {})
                         add_live_timing_evidence(report['live'], partial)
@@ -482,16 +482,14 @@ def main():
                         report['live']['cancellation'] = {key: cancelled[key] for key in ['state', 'total', 'translatedCount']}
                         report['live']['exportsSkipped'] = True
                     else:
-                        complete = wait_job(driver, job['id'], timeout=620 if options.real_api else 60)
-                        check('live video saves every translated cue from the complete source track',
-                              complete['total'] > 0 and complete['translatedCount'] == complete['total'])
-                        report['live']['backgroundJob'] = {key: complete[key] for key in ['state', 'videoId', 'total', 'translatedCount']}
-                        report['live']['metrics'] = complete.get('metrics', {})
-                        add_live_timing_evidence(report['live'], complete)
-                        report['live']['lastCueEnd'] = complete['cues'][-1]['end']
-                        for mode in ['original', 'translated', 'bilingual']:
-                            exported = extension_message(driver, {'type': 'track:export', 'id': job['id'], 'mode': mode})
-                            check(f'live video {mode} SRT exports all saved cues', len(re.findall(r'(?m)^\d{2,}:\d{2}:\d{2},\d{3} --> ', exported['content'])) == complete['total'])
+                        partial = extension_message(driver, {'type': 'track:status', 'id': job['id']})
+                        check('live video preserves available translations after disabling display',
+                              partial['total'] > 0 and partial['translatedCount'] > 0)
+                        report['live']['backgroundJob'] = {key: partial[key] for key in ['state', 'videoId', 'total', 'translatedCount']}
+                        report['live']['metrics'] = partial.get('metrics', {})
+                        add_live_timing_evidence(report['live'], partial)
+                        exported = extension_message(driver, {'type': 'track:export', 'id': job['id'], 'mode': 'original'})
+                        check('live original SRT retains the full acquired source timeline', len(re.findall(r'(?m)^\d{2,}:\d{2}:\d{2},\d{3} --> ', exported['content'])) == partial['total'])
                     if not options.real_api:
                         report['live']['mockTranslationRequestCount'] = len(STATE['requests'])
                 if not report['live']['originalVisible']:

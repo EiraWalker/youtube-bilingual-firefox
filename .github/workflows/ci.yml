@@ -44,7 +44,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: youtube-bilingual-firefox
-          path: dist/youtube-bilingual-firefox-*.zip
+          path: dist/*.zip
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

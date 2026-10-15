@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-15",
+  "version": "0.4.0",
+  "unitTests": {
+    "passed": 100,
+    "failed": 0
+  },
+  "firefoxVersion": "158.0",
+  "firefoxChecks": [
+    "production bundle installs in Firefox",
+    "settings UI saves API and grants configured host",
+    "test connection uses Firefox background fetch to configured API",
+    "each repeated test-connection click makes a new API request",
+    "opening a paused video does not submit translation requests",
+    "enabling subtitles while paused still sends no translation request",
+    "buffered playback stops submitting instead of translating the complete track",
+    "every startup request stays within the finite forward range",
+    "cached button is adjacent to bilingual toggle",
+    "seeking while paused does not request the new range",
+    "resuming after seek translates the new position",
+    "ordinary watching persists no source, translation or recovery records",
+    "leaving the player retains temporary translated rows",
+    "no subtitles are written to the cache folder by default",
+    "settings validate and save the actual native cache directory",
+    "manual caching preserves pause and creates no translation request",
+    "manual cache creates a real versioned snapshot",
+    "actual cache files include full source and partial bilingual SRT",
+    "cache is partial and contains no authentication data",
+    "paused in-flight results finish without triggering another batch",
+    "pause retains received translations in memory",
+    "hidden player cannot submit more requests when in-flight results return",
+    "disabling bilingual subtitles prevents new requests during playback",
+    "new background has no persisted subtitle index or temporary tasks",
+    "after browser restart the directory alone restores cached subtitles",
+    "updating a snapshot keeps one stable cache identity",
+    "cold cache retains the exact saved translated count"
+  ],
+  "mockApi": true,
+  "savedCueCount": 29,
+  "sourceCueCount": 35,
+  "nativeInstallerAndUninstallerUsed": true,
+  "nativeRegistrationRestored": true,
+  "isolatedProfileRemoved": true,
+  "artifacts": {
+    "youtube-bilingual-firefox-0.4.0.zip": {
+      "sha256": "765242fedf76412d286495a1a64e10d149bd972a09a313c91ffed2167f3cdf12"
+    },
+    "youtube-bilingual-cache-windows-0.4.0.zip": {
+      "sha256": "0856672e8bfc03eb7471e2da7430f31e48b62e3bf0670d19c7205ed1dd6beb60"
+    }
+  }
+}

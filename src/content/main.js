@@ -2,11 +2,13 @@ import { activeCue, chooseTrack, parseCaptionPayload } from '../shared/captions.
 
 const CHANNEL = 'youtube-bilingual-local-v1';
 let settings, player, video, overlay, originalLine, translatedLine, progress;
-let button, panel, status, trackSelect, retryButton, cancelButton, exportMode, exportButton;
+let button, cacheButton, panel, status, trackSelect, retryButton, cancelButton, exportMode, exportButton;
+let caching = false, watchSequence = 0;
+const pageSession = crypto.randomUUID();
 let enabled = false, currentVideo = '', generation = 0;
 let tracks = [], trackId = '', manualTrack = false;
 let cues = [], translations = new Map(), task = null;
-let submitting = false, polling = false, failed = false;
+let submitting = false, polling = false, failed = false, sourceVerified = false;
 let lastCapture = '', submittedSource = '', lookupKey = '', lookupSequence = 0;
 let fetchTimer, recoveryTimer, missingTimer, wasAdvert = false;
 let detachPlayback = () => {}, lastPositionAt = -Infinity;
@@ -21,23 +23,24 @@ function reportFailure(operation, text = '操作未完成，可稍后重试。')
 }
 const isAdvert = () => player?.classList.contains('ad-showing') || player?.classList.contains('ad-interrupting');
 function playbackSnapshot(reason) {
-  if (!video || isAdvert()) return undefined;
-  return { position: Math.max(0, Number(video.currentTime) || 0), rate: Math.max(.1, Number(video.playbackRate) || 1),
-    paused: video.paused, visible: !document.hidden, reason };
+  return { position: Math.max(0, Number(video?.currentTime) || 0), rate: Math.max(.1, Number(video?.playbackRate) || 1),
+    active: Boolean(enabled && sourceVerified && video && !video.paused && !video.ended && !document.hidden && !isAdvert()),
+    paused: video?.paused, visible: !document.hidden, reason, session: pageSession, sequence: ++watchSequence, view: generation };
 }
 async function reportPosition(reason = 'tick') {
-  if (!enabled || !task?.id || !video || isAdvert()) return;
+  if (!video || !currentVideo) return;
   const now = performance.now();
   if (reason === 'tick' && now - lastPositionAt < 1000) return;
   lastPositionAt = now;
-  try { await request('track:position', { id: task.id, videoId: currentVideo, ...playbackSnapshot(reason) }); }
+  try { await request('track:position', { id: task?.id, videoId: currentVideo, ...playbackSnapshot(reason) }); }
   catch { logFailure('track:position'); }
 }
 function bindPlayback() {
   detachPlayback();
   const boundVideo = video;
   const listeners = [['timeupdate', () => void reportPosition()], ['seeked', () => void reportPosition('seek')],
-    ['play', () => void reportPosition('play')], ['ratechange', () => void reportPosition('ratechange')]];
+    ['play', () => void reportPosition('play')], ['pause', () => void reportPosition('pause')],
+    ['ended', () => void reportPosition('ended')], ['ratechange', () => void reportPosition('ratechange')]];
   for (const [name, handler] of listeners) boundVideo.addEventListener(name, handler);
   detachPlayback = () => {
     for (const [name, handler] of listeners) boundVideo.removeEventListener(name, handler);
@@ -57,9 +60,15 @@ const busy = () => submitting || ['queued', 'translating', 'retrying'].includes(
 const requestedTrack = () => settings?.sourceLanguage === 'auto' && !manualTrack ? '' : trackId;
 
 function updateControls() {
+  if (cacheButton) {
+    cacheButton.disabled = caching || !task?.id || !cues.length;
+    cacheButton.textContent = caching ? '缓存中…' : task?.cachePath ? (task.cachedCount === task.total ? '已缓存' : '部分缓存') : '缓存字幕';
+    cacheButton.title = task?.cachePath ? `已缓存 ${task.cachedCount} / ${task.total} · ${task.cachePath}` : '保存当前可用字幕';
+    cacheButton.setAttribute('aria-label', '缓存字幕');
+  }
   if (!exportButton) return;
   exportButton.disabled = !task?.id || (exportMode.value !== 'original' && task.state !== 'complete');
-  cancelButton.disabled = !task?.id || !busy();
+  cancelButton.disabled = !task?.id || task.state === 'complete' || task.state === 'cancelled';
   retryButton.disabled = busy();
   retryButton.textContent = task?.state === 'complete' ? '重新翻译' : task?.id ? '恢复翻译' : '重试';
 }
@@ -68,10 +77,15 @@ function setStatus(text, error = false) {
   updateControls();
 }
 
-// Detaching a player view never cancels its independently owned background job.
+// Revoke the old view even when source loading or a start request is pending.
 function resetView() {
+  if (currentVideo) {
+    const snapshot = playbackSnapshot('detach'); snapshot.active = false;
+    request('track:position', { id: task?.id, videoId: task?.videoId || currentVideo, ...snapshot }).catch(() => {});
+  }
   generation++; lookupSequence++;
   cues = []; translations = new Map(); task = null;
+  sourceVerified = false;
   submitting = false; polling = false; failed = false;
   lastCapture = ''; submittedSource = ''; lookupKey = '';
   lastPositionAt = -Infinity;
@@ -96,9 +110,11 @@ function applyTask(result) {
   const count = `${result.translatedCount ?? translations.size} / ${result.total ?? cues.length}`;
   clearTimeout(fetchTimer); clearTimeout(recoveryTimer); clearTimeout(missingTimer);
   if (result.state === 'complete') {
-    setStatus(`已翻译 ${count} 条字幕${result.cached ? '（已保存）' : ''}`);
+    setStatus(`已翻译 ${count} 条字幕`);
   } else if (failed) {
-    setStatus(`${result.state === 'cancelled' ? '已取消' : result.state === 'paused' ? '已暂停' : '未完成'} · 已保存 ${count}`);
+    setStatus(`${result.state === 'cancelled' ? '已取消' : result.state === 'paused' ? '已暂停' : '未完成'} · 已翻译 ${count}`);
+  } else if (result.state === 'buffered') {
+    setStatus(`缓冲就绪 · 已翻译 ${count}`);
   } else setStatus(`${result.retryingCount ? '等待重试' : '正在翻译'} · ${count}`);
   updateControls();
 }
@@ -123,10 +139,10 @@ async function lookupTrack() {
     const saved = await request('track:lookup', { videoId: currentVideo, track });
     if (version !== generation || sequence !== lookupSequence || !enabled) return;
     if (saved) {
-      applyTask(saved); void reportPosition('activate');
+      applyTask(saved);
       // Lookup has only a track identity. Fetch the full source again so start
       // can verify its fingerprint before resuming a paid partial task.
-      if (['failed', 'cancelled', 'paused'].includes(saved.state)) bridge('fetch-track', { trackId });
+      bridge('fetch-track', { trackId });
     }
   } catch {
     if (version === generation && !task) logFailure('track:lookup');
@@ -140,6 +156,7 @@ async function submitTrack(force = false) {
   submittedSource = source; lookupSequence++;
   const version = generation;
   submitting = true; failed = false;
+  sourceVerified = true;
   if (force) { translations = new Map(); task = null; }
   setStatus('正在翻译');
   try {
@@ -151,13 +168,13 @@ async function submitTrack(force = false) {
     });
     if (version === generation && enabled) applyTask(result);
   } catch {
-    if (version === generation) { failed = true; submittedSource = ''; reportFailure('track:start', '未完成，可点击重试。'); }
+    if (version === generation) { failed = true; sourceVerified = false; submittedSource = ''; reportFailure('track:start', '未完成，可点击重试。'); }
   } finally {
     if (version === generation) { submitting = false; updateControls(); }
   }
 }
 async function pollTask() {
-  if (!task?.id || polling || !enabled) return;
+  if (!task?.id || polling) return;
   const version = generation, id = task.id;
   polling = true;
   try {
@@ -190,12 +207,29 @@ function setEnabled(value) {
     setStatus('请先配置 API 地址、模型与目标语言。');
     request('settings:open').catch(() => {}); return;
   }
-  enabled = value; resetView();
+  enabled = value;
+  void reportPosition('toggle');
   player?.classList.toggle('ytbl-enabled', enabled);
   button?.setAttribute('aria-pressed', String(enabled));
   if (enabled) {
     setStatus('正在获取完整字幕…'); bridge('enable', { trackId: requestedTrack() }); scheduleCapture();
-  } else { bridge('disable'); setStatus('双语字幕已关闭；已提交的翻译会在后台继续。'); }
+    if (task?.id) void reportPosition('activate');
+  } else { bridge('disable'); setStatus('双语字幕已关闭'); }
+}
+async function cacheSubtitles() {
+  if (!task?.id || caching) return;
+  if (!settings?.cacheConfigured) { await request('settings:open'); return; }
+  const id = task.id, version = generation;
+  caching = true; updateControls();
+  try {
+    const result = await request('track:cache', { id });
+    if (version === generation && id === task?.id) {
+      task.cachePath = result.path; task.cachedCount = result.translatedCount;
+      setStatus(`${result.complete ? '已缓存' : '部分缓存'} · ${result.translatedCount} / ${result.total}`);
+      cacheButton.title = result.path;
+    }
+  } catch { if (version === generation) reportFailure('track:cache', '缓存未完成，请检查设置中的目录与缓存组件。'); }
+  finally { caching = false; updateControls(); }
 }
 function element(tag, className, text) {
   const result = document.createElement(tag); result.className = className;
@@ -204,7 +238,7 @@ function element(tag, className, text) {
 }
 function attachPlayer(nextPlayer, nextVideo) {
   player?.classList.remove('ytbl-enabled', 'ytbl-rendering');
-  overlay?.remove(); progress?.remove(); button?.remove(); panel?.remove();
+  overlay?.remove(); progress?.remove(); button?.remove(); cacheButton?.remove(); panel?.remove();
   player = nextPlayer; video = nextVideo;
   bindPlayback();
   overlay = element('div', 'ytbl-overlay'); overlay.hidden = true;
@@ -214,12 +248,15 @@ function attachPlayer(nextPlayer, nextVideo) {
   progress.setAttribute('role', 'status'); player.append(progress);
   button = element('button', 'ytbl-toggle', '双语字幕'); button.type = 'button';
   button.title = '单击开关双语字幕；右键打开字幕设置'; button.setAttribute('aria-pressed', String(enabled));
+  cacheButton = element('button', 'ytbl-cache', '缓存字幕'); cacheButton.type = 'button';
+  cacheButton.addEventListener('click', event => { event.stopPropagation(); void cacheSubtitles(); });
   button.addEventListener('click', event => { event.stopPropagation(); setEnabled(!enabled); });
   button.addEventListener('contextmenu', event => {
     event.preventDefault(); event.stopPropagation(); panel.hidden = !panel.hidden;
   });
   const controls = player.querySelector('.ytp-right-controls');
-  button.classList.toggle('ytbl-floating', !controls); (controls || player).prepend(button);
+  button.classList.toggle('ytbl-floating', !controls); cacheButton.classList.toggle('ytbl-floating', !controls);
+  (controls || player).prepend(button, cacheButton);
   panel = element('div', 'ytbl-panel'); panel.hidden = true;
   panel.addEventListener('click', event => event.stopPropagation());
   const title = element('strong', '', 'YouTube 双语字幕');
@@ -289,7 +326,7 @@ function synchronizePage() {
     if (currentVideo) {
       resetView(); bridge('disable'); player?.classList.remove('ytbl-enabled', 'ytbl-rendering');
       detachPlayback(); detachPlayback = () => {};
-      overlay?.remove(); progress?.remove(); button?.remove(); panel?.remove(); player = null; video = null; currentVideo = '';
+      overlay?.remove(); progress?.remove(); button?.remove(); cacheButton?.remove(); panel?.remove(); player = null; video = null; currentVideo = '';
     }
     return;
   }
@@ -299,7 +336,7 @@ function synchronizePage() {
   if (rebound) { if (!changed) resetView(); attachPlayer(nextPlayer, nextVideo); }
   const controls = player.querySelector('.ytp-right-controls');
   if (controls && button.parentElement !== controls) {
-    button.classList.remove('ytbl-floating'); controls.prepend(button);
+    button.classList.remove('ytbl-floating'); cacheButton.classList.remove('ytbl-floating'); controls.prepend(button, cacheButton);
     if (enabled) { bridge('enable', { trackId: requestedTrack() }); scheduleCapture(); }
   }
   if (changed || rebound) {
@@ -332,7 +369,7 @@ window.addEventListener('message', event => {
       lastCapture = message.body;
       clearTimeout(fetchTimer); clearTimeout(recoveryTimer); clearTimeout(missingTimer);
       if (JSON.stringify(parsed) === JSON.stringify(cues) && task) {
-        if (['failed', 'cancelled', 'paused'].includes(task.state)) void submitTrack();
+        if (!sourceVerified) void submitTrack();
         return;
       }
       generation++; lookupSequence++; polling = false; submitting = false;
@@ -349,6 +386,7 @@ window.addEventListener('message', event => {
 function render() {
   if (!player || !video) return;
   const advert = isAdvert();
+  if (advert !== wasAdvert) void reportPosition('advert');
   const advertEnded = wasAdvert && !advert;
   wasAdvert = advert;
   if (enabled && advertEnded) {
@@ -358,7 +396,7 @@ function render() {
     void reportPosition('activate');
     if (!task && !cues.length) { failed = false; lookupKey = ''; scheduleCapture(); }
   }
-  progress.hidden = !enabled || advert || failed || task?.state === 'complete' || video.ended;
+  progress.hidden = !enabled || advert || failed || ['complete', 'buffered'].includes(task?.state) || video.ended;
   progress.textContent = task?.retryingCount ? '等待重试' : busy() ? '正在翻译' : '正在获取完整字幕…';
   if (!enabled || advert || video.ended) {
     overlay.hidden = true; player.classList.remove('ytbl-rendering'); return;
@@ -372,15 +410,21 @@ browser.storage.onChanged.addListener(async (changes, area) => {
   if (area !== 'local' || !changes.settings) return;
   try {
     settings = await request('settings:public'); applyAppearance();
+    resetView();
     trackId = ''; manualTrack = false; bridge('refresh');
     if (enabled) setEnabled(settings.ready);
   } catch { logFailure('settings:public'); }
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) void reportPosition('activate'); });
+document.addEventListener('visibilitychange', () => void reportPosition('visibility'));
+window.addEventListener('pagehide', () => {
+  const snapshot = playbackSnapshot('detach'); snapshot.active = false;
+  request('track:position', { id: task?.id, videoId: currentVideo, ...snapshot }).catch(() => {});
+});
 window.addEventListener('focus', () => void reportPosition('activate'));
 async function start() {
   settings = await request('settings:public'); enabled = settings.autoEnable && settings.ready;
   synchronizePage(); document.addEventListener('yt-navigate-finish', synchronizePage);
   setInterval(synchronizePage, 500); setInterval(render, 120); setInterval(() => void pollTask(), 700);
+  setInterval(() => void reportPosition('heartbeat'), 2500);
 }
 start().catch(() => logFailure('initialize'));

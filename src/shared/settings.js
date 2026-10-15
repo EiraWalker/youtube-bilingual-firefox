@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   fontSize: 24,
   bottomOffset: 70,
   autoEnable: false,
+  cacheFolder: '',
 });
 
 export function completionEndpoint(input) {
@@ -39,6 +40,7 @@ export function normalizeSettings(input = {}) {
     fontSize: Math.max(14, Math.min(48, Number(input.fontSize) || 24)),
     bottomOffset: Math.max(20, Math.min(240, Number(input.bottomOffset) || 70)),
     autoEnable: input.autoEnable === true,
+    cacheFolder: String(input.cacheFolder ?? '').trim(),
   };
 }
 
@@ -53,7 +55,7 @@ export function publicSettings(settings) {
   let ready = true;
   try { validateSettings(settings); } catch { ready = false; }
   const { targetLanguage, sourceLanguage, fontSize, bottomOffset, autoEnable } = settings;
-  return { targetLanguage, sourceLanguage, fontSize, bottomOffset, autoEnable, ready };
+  return { targetLanguage, sourceLanguage, fontSize, bottomOffset, autoEnable, ready, cacheConfigured: Boolean(settings.cacheFolder) };
 }
 
 export async function readSettings(storage) {

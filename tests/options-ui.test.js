@@ -47,7 +47,7 @@ test('saved library shows partial counts and resumes only missing work; translat
   const f = await fixture([record({ error: 'provider-secret' })]);
   const card = f.get('library-list').children[0], nodes = allNodes(card);
   const text = nodes.map(n => n.textContent).join(' ');
-  assert.match(text, /已保存 4 \/ 10/);
+  assert.match(text, /已翻译 4 \/ 10/);
   assert.doesNotMatch(text, /provider-secret/);
   const mode = nodes.find(n => n.tag === 'select');
   const download = nodes.find(n => n.textContent === '导出 SRT');
@@ -79,4 +79,23 @@ test('a retrying library task exposes cancellation instead of another resume and
   assert.ok(nodes.some(n => n.textContent === '取消翻译'));
   assert.equal(nodes.some(n => n.textContent === '恢复翻译'), false);
   assert.equal(nodes.find(n => n.textContent === '导出 SRT').disabled, false);
+});
+
+test('changed cache directory is validated and normalized before settings are saved', async () => {
+  const f = await fixture([], async message => message.type === 'cache:validate' ? { folder: 'validated-directory' } : null);
+  f.get('cacheFolder').value = 'new-directory';
+  await f.get('settings-form').emit('submit');
+  assert.equal(f.calls.find(c => c.type === 'cache:validate').folder, 'new-directory');
+  assert.equal(f.get('cacheFolder').value, 'validated-directory');
+  assert.match(f.get('status').textContent, /已保存/);
+});
+
+test('unavailable native cache rejects changed settings; directory reveal only follows explicit action', async () => {
+  const f = await fixture([], async () => { throw new Error('missing native host'); });
+  assert.equal(f.calls.some(c => c.type === 'cache:open'), false);
+  f.get('cacheFolder').value = 'new-directory';
+  await f.get('settings-form').emit('submit');
+  assert.match(f.get('status').textContent, /尚未保存/);
+  await f.get('open-cache-folder').emit('click');
+  assert.equal(f.calls.filter(c => c.type === 'cache:open').length, 1);
 });

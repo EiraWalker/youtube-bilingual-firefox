@@ -22,3 +22,7 @@
 .ytbl-export-actions { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
 .ytbl-export-actions select { margin: 0; flex: 1; }
 .ytbl-export-actions button { white-space: nowrap; }
+.ytbl-cache { cursor: pointer; border: 1px solid #aaa; border-radius: 5px; padding: 4px 9px; background: #202020; color: #fff; font: 600 13px Arial, sans-serif; align-self: center; vertical-align: middle; margin: 0 6px 0 0; line-height: 20px; height: 30px; }
+.ytbl-cache:disabled { opacity: .45; cursor: default; }
+.ytbl-cache.ytbl-floating { position: absolute; z-index: 75; right: 120px; bottom: 12px; }
+.ytbl-toggle:focus-visible, .ytbl-cache:focus-visible { outline: 2px solid #ffdf9c; outline-offset: 2px; }

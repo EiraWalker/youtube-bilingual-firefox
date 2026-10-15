@@ -11,12 +11,12 @@ test('segment planning keeps cue boundaries and enforces both timeline and text 
   assert.deepEqual(planSegment([cue('a', 0, 100, 'x'.repeat(2000))], new Set(), 0).map(row => row.id), ['a']);
 });
 
-test('segment planning starts near playback, excludes saved and in-flight cues, and wraps to earlier gaps', () => {
+test('segment planning starts near playback, excludes occupied cues, and never wraps to earlier gaps', () => {
   const source = [cue('a', 0, 5), cue('b', 5, 10), cue('c', 10, 15), cue('d', 15, 20)];
   const unavailable = new Set(['a', 'c']);
   assert.deepEqual(planSegment(source, unavailable, 5).map(row => row.id), ['b']);
   assert.deepEqual(planSegment(source, unavailable, 12).map(row => row.id), ['d']);
-  assert.deepEqual(planSegment(source, unavailable, 21).map(row => row.id), ['b']);
+  assert.deepEqual(planSegment(source, unavailable, 21), []);
   assert.deepEqual(planSegment(source, new Set(source.map(row => row.id)), 5), []);
   assert.deepEqual([...unavailable], ['a', 'c']);
 });

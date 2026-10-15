@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "YouTube 双语字幕 · Local",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "在 YouTube 播放器内显示原文与 OpenAI 兼容 API 翻译的字幕。",
   "browser_specific_settings": {
     "gecko": {
@@ -10,7 +10,7 @@
       "data_collection_permissions": { "required": ["websiteContent"] }
     }
   },
-  "permissions": ["storage", "downloads", "https://www.youtube.com/*"],
+  "permissions": ["storage", "downloads", "nativeMessaging", "https://www.youtube.com/*"],
   "optional_permissions": ["https://*/*", "http://*/*"],
   "background": { "scripts": ["background.js"], "persistent": true },
   "content_scripts": [

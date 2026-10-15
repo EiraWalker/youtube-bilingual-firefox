@@ -4,7 +4,7 @@ const form = document.getElementById('settings-form');
 const status = document.getElementById('status');
 const saveButton = document.getElementById('save');
 const testButton = document.getElementById('test');
-const fields = ['apiBaseUrl', 'apiKey', 'model', 'targetLanguage', 'sourceLanguage', 'fontSize', 'bottomOffset', 'autoEnable'];
+const fields = ['apiBaseUrl', 'apiKey', 'model', 'targetLanguage', 'sourceLanguage', 'fontSize', 'bottomOffset', 'autoEnable', 'cacheFolder'];
 
 function logFailure(operation) {
   // The background owns detailed, redacted diagnostics. Arbitrary provider
@@ -45,6 +45,12 @@ async function save() {
   // Called immediately from the submit/click handler to preserve the user gesture.
   const granted = await browser.permissions.request({ origins: [apiOriginPattern(settings)] });
   if (!granted) throw new Error('未授予 API 地址访问权限，设置尚未保存。');
+  const prior = await readSettings(browser.storage.local);
+  if (settings.cacheFolder && settings.cacheFolder !== prior.cacheFolder) {
+    const actual = await trackRequest('cache:validate', { folder: settings.cacheFolder });
+    settings.cacheFolder = actual.folder;
+    document.getElementById('cacheFolder').value = actual.folder;
+  }
   await browser.storage.local.set({ [SETTINGS_KEY]: settings });
   return settings;
 }
@@ -55,7 +61,7 @@ form.addEventListener('submit', async event => {
   catch (error) { display(error.message, true); return; }
   saveButton.disabled = true; testButton.disabled = true;
   try { await save(); display('设置已保存。返回 YouTube 即可启用双语字幕。'); }
-  catch { logFailure('settings:save'); display('设置尚未保存，可稍后重试。'); }
+  catch { logFailure('settings:save'); display('设置尚未保存，请检查缓存目录与本地组件。'); }
   finally { saveButton.disabled = false; testButton.disabled = false; }
 });
 
@@ -85,6 +91,10 @@ readSettings(browser.storage.local).then(settings => {
 const libraryList = document.getElementById('library-list');
 const libraryStatus = document.getElementById('library-status');
 const selectedModes = new Map();
+document.getElementById('open-cache-folder').addEventListener('click', async () => {
+  try { await trackRequest('cache:open'); libraryStatus.textContent = '已打开缓存文件夹。'; }
+  catch { libraryFailure('cache:open'); }
+});
 let refreshing = false;
 let librarySignature = '';
 
@@ -111,7 +121,7 @@ async function refreshLibrary() {
     librarySignature = signature;
     document.getElementById('library-count').textContent = `${records.length} 项`;
     document.getElementById('library-empty').hidden = records.length > 0;
-    const labels = { queued: '等待翻译', translating: '正在翻译', retrying: '等待重试', paused: '已暂停', complete: '已保存', failed: '未完成', cancelled: '已取消' };
+    const labels = { queued: '等待翻译', translating: '正在翻译', retrying: '等待重试', buffered: '缓冲就绪', paused: '已暂停', complete: '翻译完成', failed: '未完成', cancelled: '已取消' };
     const cards = records.map(record => {
       const card = makeElement('article', '', 'subtitle-record');
       card.dataset.taskId = record.id;
@@ -123,7 +133,7 @@ async function refreshLibrary() {
       heading.append(title, makeElement('span', record.retryingCount && record.state !== 'complete' ? '等待重试' : labels[record.state] || '未完成', 'record-state'));
       const detail = makeElement('p', `${record.track.language}${record.track.automatic ? '（自动生成）' : ''} → ${record.targetLanguage} · ${record.model}`);
       card.append(heading, detail);
-      card.append(makeElement('p', `已保存 ${record.translatedCount || 0} / ${record.total || 0} 条字幕`, 'record-progress'));
+      card.append(makeElement('p', `已翻译 ${record.translatedCount || 0} / ${record.total || 0} · 已缓存 ${record.cachedCount || 0}${record.legacy ? '（旧版）' : ''}`, 'record-progress'));
       const actions = makeElement('div', '', 'record-actions');
       const mode = makeElement('select'); mode.setAttribute('aria-label', 'SRT 导出内容');
       for (const [value, label] of [['bilingual', '双语'], ['translated', '译文'], ['original', '原文']]) {
@@ -170,7 +180,7 @@ document.getElementById('clear-library').addEventListener('click', async event =
   const button = event.currentTarget; button.disabled = true;
   try {
     await trackRequest('track:clear');
-    libraryStatus.textContent = '已清除保存的译文；正在运行的任务继续执行。';
+    libraryStatus.textContent = '已清除旧版完整缓存；文件夹中的字幕保留。';
     await refreshLibrary();
   } catch { libraryFailure('track:clear'); }
   finally { button.disabled = false; }
