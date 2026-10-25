@@ -1,6 +1,6 @@
 {
   "name": "youtube-bilingual-local",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "YouTube player bilingual subtitles using an OpenAI-compatible API, for Firefox.",
@@ -8,7 +8,8 @@
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.js",
     "lint": "web-ext lint --source-dir build/firefox --warnings-as-errors",
-    "package": "npm run build && npm run lint && web-ext build --source-dir build/firefox --artifacts-dir dist --filename youtube-bilingual-firefox-{version}.zip --overwrite-dest && python -X utf8 scripts/package-native.py",
+    "package": "npm run build && npm run lint && web-ext build --source-dir build/firefox --artifacts-dir dist --filename youtube-bilingual-firefox-{version}.zip --overwrite-dest && node scripts/package-xpi.mjs && python -X utf8 scripts/package-native.py",
+    "install:nightly": "npm run package && node scripts/install-nightly.mjs",
     "start": "web-ext run --source-dir build/firefox"
   },
   "devDependencies": {

@@ -59,10 +59,23 @@ class ApiHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-        subtitles = json.loads(body['messages'][1]['content'])['subtitles']
+        mt = body['model'].startswith('qwen-mt-')
+        mt_protocol_valid = False
+        if mt:
+            text = body['messages'][0]['content']
+            # MT sends raw text, not IDs. Resolve identity only from this known
+            # synthetic fixture corpus so the server can gate individual cues.
+            cue_id = next((str(index) for index, (_, source) in enumerate(FIXTURE_CUES) if source == text), 'mt-test')
+            subtitles = [{'id': cue_id, 'text': text}]
+            mt_protocol_valid = (len(body['messages']) == 1 and body['messages'][0]['role'] == 'user'
+                and body.get('stream') is False
+                and body.get('translation_options') == {'source_lang': 'auto', 'target_lang': 'Chinese'})
+        else:
+            subtitles = json.loads(body['messages'][1]['content'])['subtitles']
         with STATE['lock']:
             tag = STATE['tag']
             control = STATE['controls'].get(tag, {})
+            control = {**control, **control.get('models', {}).get(body.get('model'), {})}
             index = sum(record['tag'] == tag for record in STATE['requests'])
             code = 200
             ids = [cue['id'] for cue in subtitles]
@@ -76,6 +89,8 @@ class ApiHandler(http.server.BaseHTTPRequestHandler):
             delay = delays[index] if index < len(delays) else control.get('delay', .05)
             gates = control.get('gates', [])
             gate = gates[index] if index < len(gates) else control.get('gate')
+            if ids[0] in control.get('cue_gates', {}):
+                gate = control['cue_gates'][ids[0]]
             STATE['active'] += 1
             STATE['peak'] = max(STATE['peak'], STATE['active'])
             record = {'path': self.path, 'model': body['model'], 'count': len(subtitles),
@@ -83,13 +98,16 @@ class ApiHandler(http.server.BaseHTTPRequestHandler):
                       'started': time.monotonic(), 'active': STATE['active'],
                       'has_test_auth': self.headers.get('Authorization') == 'Bearer fixture-key'}
             STATE['requests'].append(record)
+            if mt:
+                record['mtProtocolValid'] = mt_protocol_valid
         if gate:
             gate.wait(45)
         if delay:
             time.sleep(delay)
         translations = {'Hello world.': '你好，世界。', 'Second subtitle.': '第二条字幕。', 'After seeking.': '跳转后的字幕。', 'A distant subtitle.': '远处的字幕。'}
         # Exercise compatible providers that return numeric IDs for numeric source IDs.
-        payload = {'choices': [{'message': {'content': json.dumps({'translations': [{'id': int(cue['id']) if cue['id'].isdigit() else cue['id'], 'text': translations.get(cue['text'], '测试译文：' + cue['text'])} for cue in subtitles]}, ensure_ascii=False)}}]}
+        content = (control.get('prefix', '') + translations.get(subtitles[0]['text'], '测试译文：' + subtitles[0]['text'])) if mt else json.dumps({'translations': [{'id': int(cue['id']) if cue['id'].isdigit() else cue['id'], 'text': control.get('prefix', '') + translations.get(cue['text'], '测试译文：' + cue['text'])} for cue in subtitles]}, ensure_ascii=False)
+        payload = {'choices': [{'message': {'content': content}}]}
         data = json.dumps(payload, ensure_ascii=False).encode()
         try:
             self.send_response(code)
@@ -320,6 +338,9 @@ def main():
     args = argparse.ArgumentParser()
     args.add_argument('--live', action='store_true', help='Also attempt a public YouTube page through the real network.')
     args.add_argument('--live-only', action='store_true', help='Skip the already verified local player cases.')
+    args.add_argument('--progress-only', action='store_true', help='Test timed player progress without registering the native cache host.')
+    args.add_argument('--multi-model-only', action='store_true', help='Test parallel model racing and priority upgrades without registering the native cache host.')
+    args.add_argument('--qwen-mt-only', action='store_true', help='Test raw-text MT protocol, partial delivery and cue-local recovery with the local HTTP fixture.')
     args.add_argument('--video', default='dQw4w9WgXcQ', help='Public YouTube video ID used by the live probe.')
     args.add_argument('--real-api', action='store_true', help='Read private API configuration from stdin; only valid with --live-only.')
     args.add_argument('--first-only', action='store_true', help='Measure first usable subtitles, explicitly cancel the task, and skip whole-track exports; requires --live-only.')
@@ -334,6 +355,10 @@ def main():
         OUT.mkdir(parents=True, exist_ok=True)
     if options.live_only:
         options.live = True
+    if (options.progress_only or options.multi_model_only or options.qwen_mt_only) and options.live:
+        args.error('Local-only cases cannot be combined with a live probe')
+    if sum([options.progress_only, options.multi_model_only, options.qwen_mt_only]) > 1:
+        args.error('Choose one local-only browser case')
     if options.real_api and not options.live_only:
         args.error('--real-api requires --live-only')
     if options.first_only and not options.live_only:
@@ -382,7 +407,7 @@ def main():
         check('production bundle installs in Firefox', installed == ADDON_ID)
         options_url = extension_url(driver)
         driver.cmd('/url', {'url': options_url})
-        driver.wait("document.getElementById('apiBaseUrl').value.includes('openai')")
+        driver.wait("document.getElementById('apiBaseUrl')?.value.includes('openai')")
         config = real_api or {'apiBaseUrl': f'http://127.0.0.1:{api.server_address[1]}/v1', 'apiKey': 'fixture-key', 'model': 'fixture-model', 'targetLanguage': 'zh-CN'}
         driver.js("for (const [key,value] of Object.entries(arguments[0])) document.getElementById(key).value=value", config)
         report['translationService'] = { 'real': options.real_api, 'endpoint': config['apiBaseUrl'], 'model': config['model'] }
@@ -401,7 +426,16 @@ def main():
                     time.sleep(.1)
                 driver.wait("document.getElementById('status').textContent.includes('连接成功')")
             check('each repeated test-connection click makes a new API request', len(STATE['requests']) == test_before + 2)
-        if not options.live_only:
+        if options.multi_model_only:
+            from firefox_multi_model_cases import run_multi_model_cases
+            report.update(run_multi_model_cases(driver, STATE, check, OUT, options_url, config['apiBaseUrl'], FIXTURE_CUES))
+        elif options.qwen_mt_only:
+            from firefox_qwen_mt_cases import run_qwen_mt_cases
+            report.update(run_qwen_mt_cases(driver, STATE, check, OUT, options_url, config['apiBaseUrl']))
+        elif options.progress_only:
+            from firefox_progress_cases import run_progress_cases
+            report.update(run_progress_cases(driver, STATE, check, OUT, FIXTURE_CUES))
+        elif not options.live_only:
             from firefox_demand_cases import run_fixture_cases
             options_url, buffered_report = run_fixture_cases(
                 driver, options_url, STATE, check, extension_message, wait_job,

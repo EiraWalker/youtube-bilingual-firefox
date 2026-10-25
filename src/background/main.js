@@ -1,4 +1,4 @@
-import { apiOriginPattern, publicSettings, readSettings } from '../shared/settings.js';
+import { apiOriginPattern, enabledModels, publicSettings, readSettings } from '../shared/settings.js';
 import { TranslationService, translateCues } from './translator.js';
 import { TrackTaskService } from './track-tasks.js';
 import { SubtitleCache } from './subtitle-cache.js';
@@ -96,8 +96,11 @@ browser.runtime.onMessage.addListener((message, sender) => {
         if (!fromOptions) throw new Error('请从设置页测试接口。');
         {
           const settings = await loadSettings();
-          if (!await browser.permissions.contains({ origins: [apiOriginPattern(settings)] })) throw new Error('尚未授权访问翻译接口，请保存设置并授权。');
-          return translateCues(settings, [{ id: 'test', text: 'Hello, welcome to this video.' }]);
+          const models = enabledModels(settings);
+          const model = message.modelId === undefined ? models[0] : models.find(item => item.id === message.modelId);
+          if (!model) throw new Error('请选择已启用的模型。');
+          if (!await browser.permissions.contains({ origins: [apiOriginPattern(model)] })) throw new Error('尚未授权访问翻译接口，请保存设置并授权。');
+          return translateCues(model, [{ id: 'test', text: 'Hello, welcome to this video.' }]);
         }
       default: throw new Error('未知请求。');
     }

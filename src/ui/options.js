@@ -1,10 +1,70 @@
-import { apiOriginPattern, normalizeSettings, readSettings, SETTINGS_KEY, validateSettings } from '../shared/settings.js';
+import { apiOriginPatterns, normalizeSettings, readSettings, SETTINGS_KEY, validateSettings } from '../shared/settings.js';
 
 const form = document.getElementById('settings-form');
 const status = document.getElementById('status');
 const saveButton = document.getElementById('save');
 const testButton = document.getElementById('test');
-const fields = ['apiBaseUrl', 'apiKey', 'model', 'targetLanguage', 'sourceLanguage', 'fontSize', 'bottomOffset', 'autoEnable', 'cacheFolder'];
+const fields = ['targetLanguage', 'sourceLanguage', 'fontSize', 'bottomOffset', 'autoEnable', 'cacheFolder'];
+const modelList = document.getElementById('model-list');
+const addModelButton = document.getElementById('add-model');
+addModelButton.addEventListener('click', () => {
+  const settings = collect();
+  settings.models.push({ name: `模型 ${settings.models.length + 1}`, apiBaseUrl: '', apiKey: '', model: '', enabled: true, priority: 1 });
+  renderModels(normalizeSettings(settings).models);
+});
+const modelFields = ['name', 'enabled', 'priority', 'apiBaseUrl', 'apiKey', 'model'];
+let modelEditors = [];
+let busy = false;
+
+function setBusy(value) {
+  busy = value;
+  saveButton.disabled = value; testButton.disabled = value; addModelButton.disabled = value;
+  for (const editor of modelEditors) {
+    for (const input of Object.values(editor.inputs)) input.disabled = value;
+    editor.remove.disabled = value;
+    editor.test.disabled = value || !editor.inputs.enabled.checked;
+  }
+}
+
+function renderModels(profiles) {
+  modelEditors = profiles.map((profile, index) => {
+    const card = makeElement('fieldset', '', 'model-card');
+    card.append(makeElement('legend', `模型 ${index + 1}`));
+    const inputs = {};
+    const labels = { name: '显示名称', enabled: '启用此模型', priority: '优先级', apiBaseUrl: 'API 地址', apiKey: 'API Key', model: '模型名称' };
+    for (const field of modelFields) {
+      const input = makeElement('input');
+      // Preserve the first profile's selectors used by existing Firefox fixtures.
+      input.id = ['apiBaseUrl', 'apiKey', 'model'].includes(field) && index === 0 ? field : `model-${index + 1}-${field}`;
+      input.type = field === 'enabled' ? 'checkbox' : field === 'apiKey' ? 'password' : field === 'priority' ? 'number' : 'text';
+      if (field === 'enabled') input.checked = profile.enabled; else input.value = profile[field];
+      if (field === 'priority') { input.min = '1'; input.max = '1000'; input.step = '1'; }
+      if (field === 'apiKey') { input.autocomplete = 'off'; input.spellcheck = false; input.setAttribute('aria-describedby', 'api-key-help'); }
+      if (field === 'apiBaseUrl') { input.placeholder = 'https://api.example.com/v1'; input.setAttribute('aria-describedby', 'api-url-help'); }
+      if (field === 'model') { input.placeholder = '服务商提供的模型 ID'; input.maxLength = 200; input.spellcheck = false; }
+      const label = makeElement('label', labels[field]); label.htmlFor = input.id;
+      const wrapper = makeElement('div', '', field === 'enabled' ? 'model-enabled' : `model-field model-field-${field}`);
+      wrapper.append(label, input); card.append(wrapper); inputs[field] = input;
+    }
+    const test = makeElement('button', '测试此模型', 'secondary'); test.type = 'button';
+    const result = makeElement('p', '', 'model-test-status'); result.setAttribute('role', 'status'); result.setAttribute('aria-live', 'polite');
+    test.addEventListener('click', () => testModels(profile.id));
+    const updateEnabled = () => {
+      inputs.apiBaseUrl.required = inputs.enabled.checked;
+      inputs.model.required = inputs.enabled.checked;
+      test.disabled = busy || !inputs.enabled.checked;
+      // Disabled drafts remain editable and are not URL-validated by the form.
+      inputs.apiBaseUrl.type = inputs.enabled.checked ? 'url' : 'text';
+    };
+    inputs.enabled.addEventListener('change', updateEnabled); updateEnabled();
+    const remove = makeElement('button', '删除模型', 'text-button'); remove.type = 'button';
+    remove.addEventListener('click', () => renderModels(collect().models.filter(value => value.id !== profile.id)));
+    const actions = makeElement('div', '', 'actions model-actions'); actions.append(test, remove);
+    card.append(actions, result);
+    return { id: profile.id, card, inputs, remove, test, result };
+  });
+  modelList.replaceChildren(...modelEditors.map(editor => editor.card));
+}
 
 function logFailure(operation) {
   // The background owns detailed, redacted diagnostics. Arbitrary provider
@@ -33,17 +93,22 @@ function display(text, error = false) {
 }
 
 function collect() {
-  return normalizeSettings(Object.fromEntries(fields.map(id => {
+  const values = Object.fromEntries(fields.map(id => {
     const input = document.getElementById(id);
     return [id, input.type === 'checkbox' ? input.checked : input.value];
-  })));
+  }));
+  values.models = modelEditors.map(editor => ({ id: editor.id, ...Object.fromEntries(modelFields.map(field => {
+    const input = editor.inputs[field];
+    return [field, input.type === 'checkbox' ? input.checked : input.value];
+  })) }));
+  return normalizeSettings(values);
 }
 
 async function save() {
   const settings = collect();
   validateSettings(settings);
   // Called immediately from the submit/click handler to preserve the user gesture.
-  const granted = await browser.permissions.request({ origins: [apiOriginPattern(settings)] });
+  const granted = await browser.permissions.request({ origins: apiOriginPatterns(settings) });
   if (!granted) throw new Error('未授予 API 地址访问权限，设置尚未保存。');
   const prior = await readSettings(browser.storage.local);
   if (settings.cacheFolder && settings.cacheFolder !== prior.cacheFolder) {
@@ -57,30 +122,47 @@ async function save() {
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
+  if (busy) return;
   try { validateSettings(collect()); }
   catch (error) { display(error.message, true); return; }
-  saveButton.disabled = true; testButton.disabled = true;
+  setBusy(true);
   try { await save(); display('设置已保存。返回 YouTube 即可启用双语字幕。'); }
-  catch { logFailure('settings:save'); display('设置尚未保存，请检查缓存目录与本地组件。'); }
-  finally { saveButton.disabled = false; testButton.disabled = false; }
+  catch { logFailure('settings:save'); display('设置尚未保存，请检查 API 访问权限、缓存目录与本地组件。', true); }
+  finally { setBusy(false); }
 });
 
-testButton.addEventListener('click', async () => {
-  if (!form.reportValidity()) return;
+async function testModels(modelId) {
+  if (busy || !form.reportValidity()) return;
   try { validateSettings(collect()); }
   catch (error) { display(error.message, true); return; }
-  saveButton.disabled = true; testButton.disabled = true;
+  setBusy(true);
   try {
-    await save();
-    display('正在发送一条测试字幕…');
-    const result = await browser.runtime.sendMessage({ type: 'api:test' });
-    if (!result?.ok) throw new Error(result?.error || '扩展后台没有响应。');
-    display(`连接成功，测试译文：${result.data[0].text}`);
-  } catch { logFailure('api:test'); display('测试未通过，请查看扩展后台控制台。'); }
-  finally { saveButton.disabled = false; testButton.disabled = false; }
-});
+    const settings = await save();
+    const selected = modelEditors.filter(editor => settings.models.some(profile => profile.id === editor.id && profile.enabled) && (!modelId || editor.id === modelId));
+    display('正在发送测试字幕…');
+    const results = await Promise.all(selected.map(async editor => {
+      editor.result.textContent = '正在测试…'; editor.result.dataset.error = 'false';
+      try {
+        const result = await browser.runtime.sendMessage({ type: 'api:test', modelId: editor.id });
+        if (!result?.ok || !Array.isArray(result.data) || !result.data.length || typeof result.data[0].text !== 'string') throw new Error('测试结果无效。');
+        editor.result.textContent = `连接成功，测试译文：${result.data[0].text}`;
+        return true;
+      } catch {
+        logFailure('api:test');
+        editor.result.textContent = '测试未通过，请查看扩展后台控制台。'; editor.result.dataset.error = 'true';
+        return false;
+      }
+    }));
+    const succeeded = results.filter(Boolean).length;
+    display(`${succeeded} 个模型连接成功，${results.length - succeeded} 个未通过。${succeeded < results.length ? '请查看扩展后台控制台。' : ''}`);
+  } catch { logFailure('api:test'); display('测试未通过，请检查 API 访问权限、缓存目录或扩展后台控制台。'); }
+  finally { setBusy(false); }
+}
+
+testButton.addEventListener('click', () => testModels());
 
 readSettings(browser.storage.local).then(settings => {
+  renderModels(settings.models);
   for (const id of fields) {
     const input = document.getElementById(id);
     if (input.type === 'checkbox') input.checked = settings[id]; else input.value = settings[id];

@@ -75,10 +75,30 @@ export function parseTranslations(content, cues) {
   return cues.map((cue) => ({ id: cue.id, text: result.get(cue.id) }));
 }
 
-export async function translateCues(settings, cues, { fetchImpl = fetch, signal, timeoutMs = 600_000 } = {}) {
+const QWEN_MT_LANGUAGES = new Map([
+  ['zh-CN', 'Chinese'], ['zh', 'Chinese'], ['zh-TW', 'Traditional Chinese'], ['zh_tw', 'Traditional Chinese'],
+  ['en', 'English'], ['ja', 'Japanese'], ['ko', 'Korean'], ['fr', 'French'], ['de', 'German'], ['es', 'Spanish'],
+]);
+
+// MT accepts one raw cue per request; keep HTTP in flight bounded and publish
+// validated rows as they finish, even when a later cue is suspended or fails.
+export async function translateCues(settings, cues, options = {}) {
   try { validateSettings(settings); }
   catch { throw new TranslationError('请检查 API 地址、模型名称和目标语言。', { category: 'config' }); }
   validateBatch(cues);
+  if (!settings.model.startsWith('qwen-mt-')) return translateRequest(settings, cues, options);
+  const result = [];
+  for (const cue of cues) {
+    const rows = await translateRequest(settings, [cue], options);
+    result.push(...rows);
+    options.onPartial?.(rows);
+  }
+  return result;
+}
+
+async function translateRequest(settings, cues, { fetchImpl = fetch, signal, timeoutMs = 600_000, canRequest, onRequest, getSettings } = {}) {
+  // Resolve once per HTTP dispatch; an already-sent call retains its snapshot.
+  settings = getSettings?.() || settings;
   if (signal?.aborted) throw new TranslationError('翻译已取消。', { category: 'cancel' });
   const controller = new AbortController();
   let timedOut = false;
@@ -93,13 +113,20 @@ export async function translateCues(settings, cues, { fetchImpl = fetch, signal,
     if (controller.signal.aborted) throw new TranslationError('翻译已取消。', { category: 'cancel' });
     const headers = { 'Content-Type': 'application/json' };
     if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
+    if (canRequest?.(cues) === false) throw new TranslationError('翻译请求已暂停，恢复播放后继续。', { category: 'suspend' });
+    onRequest?.(cues);
     const response = await Promise.race([fetchImpl(completionEndpoint(settings.apiBaseUrl), {
       method: 'POST',
       headers,
       signal: controller.signal,
       credentials: 'omit',
       redirect: 'error',
-      body: JSON.stringify({
+      body: JSON.stringify(settings.model.startsWith('qwen-mt-') ? {
+        model: settings.model,
+        stream: false,
+        messages: [{ role: 'user', content: cues[0].text }],
+        translation_options: { source_lang: 'auto', target_lang: QWEN_MT_LANGUAGES.get(settings.targetLanguage) ?? settings.targetLanguage },
+      } : {
         model: settings.model,
         stream: false,
         messages: [
@@ -125,7 +152,12 @@ export async function translateCues(settings, cues, { fetchImpl = fetch, signal,
     try { data = await Promise.race([response.json(), interrupted]); } catch { throw new TranslationError('接口响应不是有效 JSON，请检查 API 地址。'); }
     if (data?.choices?.[0]?.finish_reason === 'length') throw new ContextLengthError('模型输出达到长度上限，完整译文未返回。');
     if (isContextLengthFailure(data)) throw new ContextLengthError('字幕片段超过模型上下文长度。');
-    return parseTranslations(data?.choices?.[0]?.message?.content, cues);
+    const content = data?.choices?.[0]?.message?.content;
+    if (settings.model.startsWith('qwen-mt-')) {
+      if (typeof content !== 'string' || !content.trim() || content.length > 40_000) throw new TranslationError('模型返回了空或无效的字幕译文。');
+      return [{ id: cues[0].id, text: content.trim() }];
+    }
+    return parseTranslations(content, cues);
   } catch (error) {
     if (controller.signal.aborted) throw new TranslationError(signal?.aborted ? '翻译已取消。' : '翻译请求超时，请检查接口后重试。', { category: signal?.aborted ? 'cancel' : 'timeout' });
     if (error instanceof TranslationError) throw error;

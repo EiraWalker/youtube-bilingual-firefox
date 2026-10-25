@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { apiOriginPattern, completionEndpoint, normalizeSettings, publicSettings } from '../src/shared/settings.js';
+import { apiOriginPattern, completionEndpoint, normalizeSettings, publicSettings, validateSettings } from '../src/shared/settings.js';
+import * as settingsModule from '../src/shared/settings.js';
 import { ContextLengthError, TranslationError, parseTranslations, translateCues, translateTrack, TranslationService } from '../src/background/translator.js';
 
 const settings = normalizeSettings({ apiBaseUrl: 'http://127.0.0.1:9876/v1', apiKey: 'test-only-key', model: 'fixture-model' });
@@ -13,6 +14,80 @@ test('API endpoints accept base or complete URLs and Firefox permissions omit po
   assert.equal(completionEndpoint('http://localhost:8000/v1/chat/completions'), 'http://localhost:8000/v1/chat/completions');
   assert.equal(apiOriginPattern(settings), 'http://127.0.0.1/*');
   for (const url of ['file:///tmp/api', 'https://user:password@example.com/v1', 'https://example.com/v1?key=secret']) assert.throws(() => completionEndpoint(url));
+});
+
+test('legacy API settings migrate losslessly to one stable enabled model and retain first-model mirrors', () => {
+  const legacy = { apiBaseUrl: 'http://localhost:8045/v1', apiKey: 'migration-fixture-key', model: 'legacy-model', targetLanguage: 'ja', cacheFolder: 'existing-folder' };
+  const migrated = normalizeSettings(legacy);
+  assert.deepEqual(migrated.models, [{ id: 'default', name: '默认模型', apiBaseUrl: legacy.apiBaseUrl, apiKey: legacy.apiKey, model: legacy.model, enabled: true, priority: 1 }]);
+  assert.deepEqual(normalizeSettings(migrated), migrated);
+  assert.equal(migrated.targetLanguage, 'ja');
+  assert.equal(migrated.cacheFolder, 'existing-folder');
+  const replacement = normalizeSettings({ ...migrated, models: [{ ...migrated.models[0], apiBaseUrl: 'https://new.example/v1', apiKey: 'replacement-fixture-key', model: 'new-model' }] });
+  assert.equal(replacement.apiBaseUrl, replacement.models[0].apiBaseUrl);
+  assert.equal(replacement.apiKey, replacement.models[0].apiKey);
+  assert.equal(replacement.model, 'new-model');
+});
+
+test('model schema normalization preserves unique IDs and bounds priorities deterministically', () => {
+  const normalized = normalizeSettings({ models: [
+    { id: 'same', name: ' Primary ', apiBaseUrl: ' https://a.example/v1 ', apiKey: ' fixture-key ', model: ' primary ', priority: -4 },
+    { id: 'same', priority: 2.9, enabled: false },
+    { id: 'model-2', priority: Infinity },
+    { priority: 50000 },
+    null,
+  ] });
+  assert.equal(new Set(normalized.models.map(profile => profile.id)).size, 5);
+  assert.equal(normalized.models[0].id, 'same');
+  assert.equal(normalized.models[2].id, 'model-2');
+  assert.deepEqual(normalized.models.map(profile => profile.priority), [1, 2, 1, 1000, 1]);
+  assert.equal(normalized.models[0].name, 'Primary');
+  assert.equal(normalized.models[0].apiBaseUrl, 'https://a.example/v1');
+  assert.equal(normalized.models[0].apiKey, 'fixture-key');
+  assert.equal(normalized.models[0].model, 'primary');
+  assert.equal(normalized.models[1].enabled, false);
+  assert.deepEqual(normalizeSettings(normalized), normalized);
+  assert.deepEqual(normalizeSettings({ models: [] }).models, []);
+});
+
+test('enabled models retain stable order, target language and all deduplicated Firefox origins', () => {
+  const legacy = { apiBaseUrl: 'http://localhost:8045/v1', model: 'legacy', targetLanguage: 'ja' };
+  assert.deepEqual(settingsModule.enabledModels(legacy), [{ ...normalizeSettings(legacy).models[0], targetLanguage: 'ja' }]);
+  const multi = normalizeSettings({ targetLanguage: 'fr', models: [
+    { id: 'slow', apiBaseUrl: 'https://one.example/v1', model: 'first', priority: 4 },
+    { id: 'fast', apiBaseUrl: 'http://localhost:1234/v1', model: 'second', priority: 1 },
+    { id: 'same-origin', apiBaseUrl: 'https://one.example/other/v1', model: 'third', priority: 1 },
+    { id: 'off', enabled: false, apiBaseUrl: 'invalid', model: '' },
+  ] });
+  const enabled = settingsModule.enabledModels(multi);
+  assert.deepEqual(enabled.map(profile => profile.id), ['slow', 'fast', 'same-origin']);
+  assert.ok(enabled.every(profile => profile.targetLanguage === 'fr'));
+  assert.deepEqual(settingsModule.apiOriginPatterns(multi), ['https://one.example/*', 'http://localhost/*']);
+  assert.deepEqual(settingsModule.apiOriginPatterns(legacy), ['http://localhost/*']);
+  assert.deepEqual(settingsModule.enabledModels({ models: [] }), []);
+  enabled[0].model = 'mutated';
+  assert.equal(multi.models[0].model, 'first');
+});
+
+test('validation checks every enabled model, permits empty disabled profiles and rejects zero enabled models safely', () => {
+  const valid = { id: 'valid', apiBaseUrl: 'https://valid.example/v1', model: 'good', enabled: true };
+  const draft = { id: 'draft', apiBaseUrl: '', apiKey: '', model: '', enabled: false };
+  const multi = normalizeSettings({ models: [draft, valid] });
+  assert.equal(validateSettings(multi), multi);
+  assert.equal(publicSettings(multi).ready, true);
+  assert.deepEqual(Object.keys(publicSettings(multi)).sort(), ['autoEnable', 'bottomOffset', 'cacheConfigured', 'fontSize', 'ready', 'sourceLanguage', 'targetLanguage']);
+  assert.throws(() => validateSettings(normalizeSettings({ models: [draft] })), /至少.*启用/);
+  assert.throws(() => validateSettings(normalizeSettings({ models: [] })), /至少.*启用/);
+  for (const bad of [
+    { ...valid, apiBaseUrl: 'https://credential-secret:private@example.com/v1' },
+    { ...valid, model: '' },
+    { ...valid, model: 'x'.repeat(201) },
+  ]) {
+    const input = normalizeSettings({ models: [valid, bad] });
+    assert.throws(() => validateSettings(input), error => !/credential-secret|private|https:\/\//.test(error.message));
+    assert.equal(publicSettings(input).ready, false);
+  }
+  assert.throws(() => validateSettings({ ...multi, targetLanguage: '' }), /目标语言/);
 });
 
 test('public settings never include credentials, model or API address', () => {
@@ -99,7 +174,7 @@ test('explicit length failures expose the split category without retrying inside
 
 test('network, configuration and validation errors have safe scheduler categories', async () => {
   await assert.rejects(translateCues(settings, cues, { fetchImpl: async () => { throw new Error('transport-secret'); } }), error => error.category === 'network' && !error.message.includes('transport-secret') && !('cause' in error));
-  await assert.rejects(translateCues({ ...settings, model: '' }, cues, { fetchImpl: () => assert.fail('must not fetch') }), error => error.category === 'config');
+  await assert.rejects(translateCues({ ...settings, model: '', models: settings.models.map(profile => ({ ...profile, model: '' })) }, cues, { fetchImpl: () => assert.fail('must not fetch') }), error => error.category === 'config');
   for (const failure of [() => new Response('invalid JSON'), () => response([{ id: 'a', text: 'missing second' }])]) {
     await assert.rejects(translateCues(settings, cues, { fetchImpl: async () => failure() }), error => error.category === 'validation');
   }

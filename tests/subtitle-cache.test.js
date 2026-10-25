@@ -132,3 +132,44 @@ test('only an explicit snapshot survives a fresh service; later in-flight rows a
   assert.equal((await fresh.list()).length, 1);
   assert.ok((await service.status(task.id)).translatedCount > cached.translatedCount);
 });
+
+test('multi-model priority upgrades reach disk only through a new explicit snapshot and survive a cold read', async t => {
+  const { cache, folder } = await fixture(t);
+  const settings = normalizeSettings({ cacheFolder: folder, targetLanguage: 'zh-CN', models: [
+    { id: 'fast', model: 'fast', apiBaseUrl: 'http://localhost/v1', enabled: true, priority: 2 },
+    { id: 'quality', model: 'quality', apiBaseUrl: 'http://localhost/v1', enabled: true, priority: 1 },
+  ] });
+  const calls = [];
+  const create = () => new TrackTaskService({ cache, storage: { async get() { return {}; } },
+    loadSettings: async () => settings, hasPermission: async () => true, logger: () => {},
+    fetchImpl: (_url, options) => new Promise(resolve => {
+      const body = JSON.parse(options.body), rows = JSON.parse(body.messages[1].content).subtitles;
+      calls.push({ model: body.model, release() { resolve(new Response(JSON.stringify({ choices: [{ message: {
+        content: JSON.stringify({ translations: rows.map(row => ({ id: row.id, text: body.model + ':' + row.text })) }),
+      } }] }))); } });
+    }) });
+  const input = { videoId: 'fixture-video', title: 'Multi cache', track: record().track, cues: record().cues,
+    playback: { session: 'multi', sequence: 1, view: 1, active: true, position: 0, rate: 1 } };
+  const service = create(), task = await service.start(input, 1);
+  t.after(() => service.cancel(task.id));
+  const waitRows = async prefix => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if ((await service.status(task.id)).translations[0]?.text.startsWith(prefix)) return;
+      await new Promise(resolve => setTimeout(resolve, 2));
+    }
+    assert.fail('timed out waiting for priority result');
+  };
+  assert.equal(calls.length, 2);
+  calls.find(call => call.model === 'fast').release(); await waitRows('fast:');
+  await service.snapshot(task.id);
+  assert.ok((await cache.read(task.id, folder)).translations[0].text.startsWith('fast:'));
+  calls.find(call => call.model === 'quality').release(); await waitRows('quality:');
+  assert.ok((await cache.read(task.id, folder)).translations[0].text.startsWith('fast:'), 'late upgrades remain in memory');
+  await service.snapshot(task.id);
+  assert.ok((await cache.read(task.id, folder)).translations[0].text.startsWith('quality:'));
+  const fresh = create();
+  const restored = await fresh.start({ ...input, playback: { ...input.playback, active: false } }, 2);
+  t.after(() => fresh.cancel(task.id));
+  assert.equal(calls.length, 2, 'cache reuse does not trigger another race');
+  assert.ok(restored.translations.every(row => row.text.startsWith('quality:')));
+});

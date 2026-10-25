@@ -31,6 +31,18 @@ main.options-main { position: relative; max-width: 1160px; margin: -26px auto 0;
 .options h2 { margin: 0; color: #18394e; font-size: 20px; font-weight: 650; line-height: 1.45; }
 .small-badge { flex-shrink: 0; padding: 5px 9px; color: #536b7e; border: 1px solid #e3edf5; border-radius: 20px; background: #f3f9fd; font-size: 10px; }
 .section-description { margin: 10px 0 26px; color: var(--muted); font-size: 13px; }
+.options .model-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(90px, .45fr); gap: 16px; min-width: 0; margin: 0 0 20px; padding: 18px; border: 1px solid #e1e8ef; border-radius: 16px; background: #fbfcfe; }
+.options .model-card legend { padding: 0 8px; color: #43596c; font-size: 13px; }
+.model-field { grid-column: 1 / -1; min-width: 0; }
+.model-field-priority { grid-column: 2; grid-row: 2; }
+.options .model-enabled { display: flex; flex-direction: row-reverse; align-items: center; justify-content: flex-end; gap: 8px; min-height: 44px; align-self: end; }
+.options .model-enabled label { margin: 0; cursor: pointer; }
+.model-enabled input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent-text); }
+.model-card .model-actions, .model-test-status { grid-column: 1 / -1; }
+.options .model-actions button, .options #add-model { min-height: 44px; }
+.model-test-status { margin: 0; color: #2d7458; font-size: 12px; overflow-wrap: anywhere; }
+.model-test-status:empty { display: none; }
+.model-test-status[data-error="true"] { color: #a6364e; }
 .options label { margin: 0 0 8px; color: #384854; font-size: 13px; font-weight: 550; }
 .options input:not([type="checkbox"]) { width: 100%; height: 44px; margin: 0; padding: 10px 13px; border: 1px solid #dce3eb; border-radius: 11px; color: #243b4d; background: #fbfcfe; font-size: 13px; transition: border-color .15s, box-shadow .15s; }
 .options input::placeholder { color: #7c8591; }

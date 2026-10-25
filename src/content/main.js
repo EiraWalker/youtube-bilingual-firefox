@@ -115,7 +115,7 @@ function applyTask(result) {
     setStatus(`${result.state === 'cancelled' ? '已取消' : result.state === 'paused' ? '已暂停' : '未完成'} · 已翻译 ${count}`);
   } else if (result.state === 'buffered') {
     setStatus(`缓冲就绪 · 已翻译 ${count}`);
-  } else setStatus(`${result.retryingCount ? '等待重试' : '正在翻译'} · ${count}`);
+  } else setStatus(`已翻译 ${count} 条字幕`);
   updateControls();
 }
 async function resumeTask() {
@@ -158,7 +158,7 @@ async function submitTrack(force = false) {
   submitting = true; failed = false;
   sourceVerified = true;
   if (force) { translations = new Map(); task = null; }
-  setStatus('正在翻译');
+  setStatus('');
   try {
     const result = await request('track:start', {
       videoId: currentVideo,
@@ -244,7 +244,7 @@ function attachPlayer(nextPlayer, nextVideo) {
   overlay = element('div', 'ytbl-overlay'); overlay.hidden = true;
   originalLine = element('div', 'ytbl-original'); translatedLine = element('div', 'ytbl-translated');
   overlay.append(originalLine, translatedLine); player.append(overlay);
-  progress = element('div', 'ytbl-progress', '正在翻译'); progress.hidden = true;
+  progress = element('div', 'ytbl-progress'); progress.hidden = true;
   progress.setAttribute('role', 'status'); player.append(progress);
   button = element('button', 'ytbl-toggle', '双语字幕'); button.type = 'button';
   button.title = '单击开关双语字幕；右键打开字幕设置'; button.setAttribute('aria-pressed', String(enabled));
@@ -396,13 +396,23 @@ function render() {
     void reportPosition('activate');
     if (!task && !cues.length) { failed = false; lookupKey = ''; scheduleCapture(); }
   }
-  progress.hidden = !enabled || advert || failed || ['complete', 'buffered'].includes(task?.state) || video.ended;
-  progress.textContent = task?.retryingCount ? '等待重试' : busy() ? '正在翻译' : '正在获取完整字幕…';
+  const cue = activeCue(cues, video.currentTime);
+  const translated = cue ? translations.get(cue.id) || '' : '';
+  // After startup, only a missing current cue needs a progress notice. Known
+  // subtitle-free gaps and background prefetch must remain unobtrusive.
+  const waitingCue = cue || (!translations.size && cues.find(item => item.end > video.currentTime));
+  const activeRequest = !translated && waitingCue && task?.activeRequests?.find(item => item.ids.includes(waitingCue.id));
+  const elapsed = activeRequest ? Math.max(0, Math.floor((Date.now() - activeRequest.startedAt) / 1000)) : 0;
+  const preparing = !translated && sourceVerified && !video.paused && !document.hidden
+    && (submitting || waitingCue && ['queued', 'translating', 'buffered'].includes(task?.state));
+  progress.textContent = activeRequest ? (activeRequest.attempt > 1 ? `正在重试（${elapsed}）` : `正在翻译(${elapsed})`)
+    : preparing ? '正在准备翻译…' : !cues.length ? '正在获取完整字幕…' : '';
+  // Pausing revokes future requests, not an HTTP response already in flight.
+  const stopped = failed && !(task?.state === 'paused' && activeRequest);
+  progress.hidden = !enabled || advert || stopped || task?.state === 'complete' || video.ended || !progress.textContent;
   if (!enabled || advert || video.ended) {
     overlay.hidden = true; player.classList.remove('ytbl-rendering'); return;
   }
-  const cue = activeCue(cues, video.currentTime);
-  const translated = cue ? translations.get(cue.id) || '' : '';
   originalLine.textContent = translated ? cue.text : ''; translatedLine.textContent = translated;
   overlay.hidden = !translated; player.classList.toggle('ytbl-rendering', Boolean(translated));
 }

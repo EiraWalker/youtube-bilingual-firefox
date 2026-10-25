@@ -36,16 +36,13 @@
         <section class="settings-card" id="translation-settings" aria-labelledby="api-title">
           <div class="card-heading"><div><p class="section-kicker">TRANSLATION SERVICE</p><h2 id="api-title">连接你的翻译服务</h2></div><span class="small-badge">OpenAI 兼容</span></div>
           <p class="section-description">使用你自己的 API，让字幕翻译更自由。</p>
-          <label for="apiBaseUrl">API 地址</label>
-          <input id="apiBaseUrl" type="url" required placeholder="https://api.example.com/v1" aria-describedby="api-url-help">
+          <div id="model-list" aria-label="翻译模型配置"></div>
+          <button id="add-model" type="button" class="secondary">添加模型</button>
+          <p class="field-help">优先级数值越小越优先；最快有效结果先显示，仅更高优先级的晚结果可升级，同优先级保留先返回结果。</p>
+          <p class="field-help" id="model-cost-help">每个视频最多同时翻译 3 个字幕片段，每片段同时请求所有启用模型，实际并发最多为 3 × 启用模型数；每个请求都可能产生 API 费用。</p>
           <p class="field-help" id="api-url-help">支持服务根地址、/v1 地址或完整 /chat/completions 地址。</p>
-          <label for="apiKey">API Key</label>
-          <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="本地免鉴权服务可留空" aria-describedby="api-key-help">
-          <p class="field-help" id="api-key-help">仅保存在当前 Firefox 配置中，不会传给 YouTube 页面。</p>
-          <div class="field-row">
-            <div class="field"><label for="model">模型名称</label><input id="model" type="text" required spellcheck="false" placeholder="服务商提供的模型 ID"></div>
-            <div class="field"><label for="targetLanguage">目标语言</label><input id="targetLanguage" type="text" required value="zh-CN" placeholder="zh-CN / English"></div>
-          </div>
+          <p class="field-help" id="api-key-help">API Key 仅保存在当前 Firefox 配置中，不会传给 YouTube 页面。</p>
+          <label for="targetLanguage">目标语言</label><input id="targetLanguage" type="text" required value="zh-CN" placeholder="zh-CN / English">
           <div class="service-note"><span class="note-icon" aria-hidden="true">↗</span><div><strong>随播放位置准备译文</strong><p>预取前方最多 120 秒；暂停或离开后停止新增请求。</p></div></div>
         </section>
 
@@ -79,7 +76,7 @@
       </section>
       <div class="save-panel">
         <p><span class="save-note-mark" aria-hidden="true">✓</span>设置好之后，回到视频就能开始。</p>
-        <div class="actions"><button type="button" id="test" class="secondary">测试连接<span aria-hidden="true"> ↗</span></button><button type="submit" id="save">保存设置<span aria-hidden="true"> →</span></button></div>
+        <div class="actions"><button type="button" id="test" class="secondary">测试全部启用模型<span aria-hidden="true"> ↗</span></button><button type="submit" id="save">保存设置<span aria-hidden="true"> →</span></button></div>
         <p id="status" role="status" aria-live="polite"></p>
       </div>
     </form>
