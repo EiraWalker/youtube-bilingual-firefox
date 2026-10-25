@@ -137,6 +137,22 @@ test('a model retries independently while another model in the same segment is s
   await settle(api, service, task.id);
 });
 
+test('an early retry timer rearms until wall-clock eligibility without needing another playback event', async t => {
+  let now = 1000;
+  const { service, api } = create(t, { loadSettings: async () => multiSettings(), concurrency: 1,
+    now: () => now, retryDelaysMs: [8, 8] });
+  const task = await service.start(request({ cues: cues.slice(0, 3) }), 11);
+  modelCall(api, 'quality-model').release(new Response('{}', { status: 503 }));
+  await until(async () => (await service.status(task.id)).retryingCount === 1);
+  // The timer fires while the injected wall clock still precedes its deadline.
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(api.calls.length, 3);
+  now = 1008;
+  await until(() => api.calls.length === 4);
+  assert.equal(JSON.parse(api.calls[3].options.body).model, 'quality-model');
+  assert.equal(modelCall(api, 'fast-model').released, undefined);
+});
+
 test('priority and enabled-set changes isolate multi-model cache identity, but key rotation does not', async t => {
   let config = multiSettings();
   const { service, api } = create(t, { loadSettings: async () => config });

@@ -2,7 +2,7 @@
 
 日期：2026-10-25。对应 ADR 0005。以下区分自动化夹具、真实接口与日常浏览器安装，不把任何一种结果代替另一种。
 
-状态：代码与三组浏览器回归通过。复核发现的完整窗口跳出/重入、取消后恢复、未来请求凭证及候选文本存续边界均已修复；日常 Nightly 的最终安装仍未开始，见末节。
+状态：代码、三组浏览器回归及日常 Nightly 最终安装均通过。复核发现的完整窗口跳出/重入、取消后恢复、未来请求凭证及候选文本存续边界均已修复，最终启用资源另行逐文件核验。
 
 ## 已实现
 
@@ -14,7 +14,7 @@
 
 ## 自动化结果
 
-- `npm test`：161 项通过，零失败/取消/跳过。
+- `npm test`：162 项通过，零失败/取消/跳过。
 - `npm run build`、`npm run lint`、`npm run package`：通过；Mozilla lint 为 0 errors、0 notices、0 warnings。
 - `scripts/test-firefox.py --progress-only --firefox <Nightly> --report-tag progress-050-final`：隔离 Nightly 160.0a1 中 18 项通过。
 - `scripts/test-firefox.py --multi-model-only --firefox <Nightly> --report-tag multi-model-050-final`：隔离 Nightly 160.0a1 中 68 项通过。
@@ -22,6 +22,7 @@
 - 三个浏览器运行均使用未修改的生产构建、独立 headless profile、本地 YouTube/API 夹具，`nativeRegistrationTouched=false`。没有使用用户浏览器配置，也没有修改系统代理或证书。
 - 初次运行发现设置页异步生成模型卡片时，测试器先访问不存在的输入框；已改为可空的就绪检查后重新运行，两组全部通过。此失败属于夹具等待条件，不记为成功验收。
 - 截图已核对首次请求、暂停后仍在途、实际重试，以及先到译文和高优先级升级；提示未遮挡字幕，可用译文出现后没有预取提示残留。
+- 首轮 GitHub CI 捕获重试计时器早于墙钟资格时间触发后丢失后续唤醒的问题。已用冻结墙钟先观测定时器提前触发的 RED 用例复现，再修复为未到期时重新排定；没有放宽原断言或只延长测试超时。修正后本地 162 项通过，三组浏览器场景全部重跑通过；云端结果以修正提交对应的 Actions run 为准。
 
 本地报告：`output/firefox/progress-050-final/report.json`、`output/firefox/multi-model-050-final/report.json`、`output/firefox/qwen-mt-050-final/report.json`。这些产物由 Git 忽略，不随源码发布。MT 夹具第一次在所有预取槽仍被阻塞时等待新位置请求；修正为正常释放预取、只阻塞当前目标响应后重跑通过，没有为通过测试扩大生产并发或取消已付费请求。
 
@@ -31,4 +32,14 @@
 
 模型设置写入前检查并发变更，写入后精确比较配置及新密钥；通过扩展后台 `api:test` 指定 Qwen 模型调用真实百炼接口成功。密钥位于项目外本地秘密目录及浏览器扩展存储，未进入源码、截图或报告。本项是单条真实 API 验证，不代表整段公网 YouTube 业务验收。
 
-当前完成模型配置，但最终构建尚未安装：默认安装流程先遇原生工具栏不可观测，之后遇面板未出现，两次收据均为 `status=not-started`、`archiveInstalled=false`。随后只读确认原 Nightly 进程已退出；未自行启动替代浏览器或正常重开原浏览器，未刷新原视频页、卸载扩展或清空数据。需原 Nightly 再次运行后继续安装及活跃资源校验，不能把历史 0.5.0 active 当作本次最终构建已启用。
+## 最终永久安装与独立读回
+
+前期安装曾因原生工具栏不可观测、面板未出现而停在 `status=not-started`、`archiveInstalled=false`，不是安装成功。原进程后来退出，随后新的日常 Nightly 已正常运行；工具没有启动替代浏览器或执行浏览器重启。
+
+按本次安装已有的窗口恢复授权，临时还原最小化的目标窗口，使用正式归档安装流程返回 `ok=true`、`permanent=true`、`archiveInstalled=true`、`status=active`，目标版本 0.5.0、`isActive=true`、`temporarilyInstalled=false`。最终 XPI 的 SHA256 为 `bcbb22b92cc5f05d9dfcea09083d4ae586113254de8f306079cdcd7e552dde3e`。
+
+独立新连接在工具自己的设置页读取 background.js、content.js、options.js、page-bridge.js、player.css、options.css、manifest.json，逐文件 SHA256 全部与最终本地构建匹配；没有仅凭相同版本号认定更新成功。安装清单本身不能证明整个安装归档散列，本次额外核验的是上述活跃资源。
+
+Qwen 接口权限和密钥匹配仍有效，Gemini 优先级 1 与 Qwen 优先级 2 均保留。工作窗口与调试服务已清理，操作锁和归属记录已释放，目标窗口恢复原先的最小化状态。未卸载、清空扩展数据、改变签名偏好或刷新用户视频页；已经打开的旧页面需下次正常导航或用户自行刷新后加载新内容脚本。
+
+本地安装报告：工具 `.local/runs/2026-10-25T08-01-02-346Z-d802eae4-dc4c-465a-bf65-181c196d5508.json`；独立资源核验报告为 `2026-10-25T08-02-42-213Z-cd42916e-2626-4b4b-aa2c-2b8114809655.json`，业务摘要在项目外 `nightly-plugin-options-receipt.json`。这些均为本地忽略产物，不随源码发布。

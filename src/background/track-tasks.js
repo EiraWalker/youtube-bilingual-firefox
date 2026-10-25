@@ -279,8 +279,14 @@ export class TrackTaskService {
     clearTimeout(segment.timer);
     const retrying = [...segment.requests.values()].filter(request => request.state === 'retrying');
     if (!retrying.length) return;
-    const delay = Math.max(0, Math.min(...retrying.map(request => request.retryAt)) - this.now());
-    segment.timer = setTimeout(() => { this.pump(entry.record.videoId); this.refreshState(entry); }, delay);
+    const deadline = Math.min(...retrying.map(request => request.retryAt));
+    const delay = Math.max(0, deadline - this.now());
+    segment.timer = setTimeout(() => {
+      this.pump(entry.record.videoId); this.refreshState(entry);
+      // Timers can precede the wall-clock deadline; retain a wake-up in that
+      // case, but never spin after an elapsed deadline while viewing is paused.
+      if (this.now() < deadline && entry.segments.get(segment.id) === segment) this.scheduleRetry(entry, segment);
+    }, delay);
     segment.timer.unref?.();
   }
   pump(videoId) {
